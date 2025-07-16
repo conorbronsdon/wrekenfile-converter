@@ -6,15 +6,28 @@ import { load, dump } from 'js-yaml';
 type Primitive = 'STRING' | 'INT' | 'FLOAT' | 'BOOL' | 'TIMESTAMP' | 'DATE' | 'ANY' | 'UUID';
 const externalRefCache: Record<string, any> = {};
 
-function mapType(type: string, format?: string): Primitive {
+function mapType(type: any, format?: string): Primitive {
   if (format === 'uuid') return 'UUID';
   if (format === 'date-time') return 'TIMESTAMP';
   if (format === 'binary') return 'STRING'; // File uploads
-  const t = type?.toLowerCase();
-  if (t === 'string') return 'STRING';
-  if (t === 'integer' || t === 'int') return 'INT';
-  if (t === 'number') return 'FLOAT';
-  if (t === 'boolean') return 'BOOL';
+  if (typeof type === 'string') {
+    const t = type.toLowerCase();
+    if (t === 'string') return 'STRING';
+    if (t === 'integer' || t === 'int') return 'INT';
+    if (t === 'number') return 'FLOAT';
+    if (t === 'boolean') return 'BOOL';
+    return 'ANY';
+  }
+  // Handle array of types (OpenAPI allows type: ['string', 'null'])
+  if (Array.isArray(type) && type.length > 0 && typeof type[0] === 'string') {
+    const t = type[0].toLowerCase();
+    if (t === 'string') return 'STRING';
+    if (t === 'integer' || t === 'int') return 'INT';
+    if (t === 'number') return 'FLOAT';
+    if (t === 'boolean') return 'BOOL';
+    return 'ANY';
+  }
+  // Fallback for missing or unexpected type
   return 'ANY';
 }
 
@@ -138,12 +151,59 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
   const structs: Record<string, any[]> = {};
   const schemas = spec.components?.schemas || {};
   
+  // Helper to recursively collect all referenced schemas, traversing all properties, arrays, and combiners
+  function collectAllReferencedSchemas(schema: any, name: string) {
+    if (!name || structs[name]) return;
+    const resolved = schema.$ref ? resolveRef(schema.$ref, spec, baseDir) : schema;
+    const fields = parseSchema(name, resolved, spec, baseDir);
+    structs[name] = fields;
+
+    // Traverse all properties
+    if (resolved.type === 'object' && resolved.properties) {
+      for (const [propName, prop] of Object.entries<any>(resolved.properties)) {
+        if (prop.$ref) {
+          const refName = prop.$ref.split('/').pop();
+          if (refName) collectAllReferencedSchemas(resolveRef(prop.$ref, spec, baseDir), refName);
+        } else if (prop.type === 'array' && prop.items) {
+          if (prop.items.$ref) {
+            const refName = prop.items.$ref.split('/').pop();
+            if (refName) collectAllReferencedSchemas(resolveRef(prop.items.$ref, spec, baseDir), refName);
+          } else if (prop.items.type === 'object' || prop.items.properties || prop.items.allOf || prop.items.oneOf || prop.items.anyOf) {
+            collectAllReferencedSchemas(prop.items, name + '_' + propName + '_Item');
+          }
+        } else if (prop.type === 'object' || prop.properties || prop.allOf || prop.oneOf || prop.anyOf) {
+          collectAllReferencedSchemas(prop, name + '_' + propName);
+        }
+      }
+    }
+    // Traverse array items at root
+    if (resolved.type === 'array' && resolved.items) {
+      if (resolved.items.$ref) {
+        const refName = resolved.items.$ref.split('/').pop();
+        if (refName) collectAllReferencedSchemas(resolveRef(resolved.items.$ref, spec, baseDir), refName);
+      } else if (resolved.items.type === 'object' || resolved.items.properties || resolved.items.allOf || resolved.items.oneOf || resolved.items.anyOf) {
+        collectAllReferencedSchemas(resolved.items, name + '_Item');
+      }
+    }
+    // Traverse allOf/oneOf/anyOf
+    for (const combiner of ['allOf', 'oneOf', 'anyOf']) {
+      if (Array.isArray(resolved[combiner])) {
+        for (const subSchema of resolved[combiner]) {
+          if (subSchema.$ref) {
+            const refName = subSchema.$ref.split('/').pop();
+            if (refName) collectAllReferencedSchemas(resolveRef(subSchema.$ref, spec, baseDir), refName);
+          } else {
+            collectAllReferencedSchemas(subSchema, name + '_' + combiner);
+          }
+        }
+      }
+    }
+  }
+
   // Extract schemas from components
   for (const name in schemas) {
+    collectAllReferencedSchemas(schemas[name], name);
     const schema = schemas[name];
-    const fields = parseSchema(name, schema, spec, baseDir);
-    // Always add the struct, even if empty
-    structs[name] = fields;
     if (schema.oneOf || schema.anyOf) {
       structs[`${name}_Union`] = [{ name: 'value', type: 'ANY', required: 'FALSE' }];
     }
@@ -157,12 +217,13 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
       // Extract request body schemas
       if (op.requestBody?.content) {
         for (const [contentType, content] of Object.entries<any>(op.requestBody.content)) {
-          if (content.schema && !content.schema.$ref) {
-            // Inline schema - create a struct for it
-            const requestStructName = generateStructName(operationId, method, pathStr, 'Request');
-            const fields = parseSchema(requestStructName, content.schema, spec, baseDir);
-            if (fields.length > 0) {
-              structs[requestStructName] = fields;
+          if (content.schema) {
+            if (content.schema.$ref) {
+              const refName = content.schema.$ref.split('/').pop();
+              if (refName) collectAllReferencedSchemas(resolveRef(content.schema.$ref, spec, baseDir), refName);
+            } else {
+              const requestStructName = generateStructName(operationId, method, pathStr, 'Request');
+              collectAllReferencedSchemas(content.schema, requestStructName);
             }
           }
         }
@@ -173,12 +234,13 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
         for (const [code, response] of Object.entries<any>(op.responses)) {
           if (response.content) {
             for (const [contentType, content] of Object.entries<any>(response.content)) {
-              if (content.schema && !content.schema.$ref) {
-                // Inline schema - create a struct for it
-                const responseStructName = generateStructName(operationId, method, pathStr, `Response${code}`);
-                const fields = parseSchema(responseStructName, content.schema, spec, baseDir);
-                if (fields.length > 0) {
-                  structs[responseStructName] = fields;
+              if (content.schema) {
+                if (content.schema.$ref) {
+                  const refName = content.schema.$ref.split('/').pop();
+                  if (refName) collectAllReferencedSchemas(resolveRef(content.schema.$ref, spec, baseDir), refName);
+                } else {
+                  const responseStructName = generateStructName(operationId, method, pathStr, `Response${code}`);
+                  collectAllReferencedSchemas(content.schema, responseStructName);
                 }
               }
             }
@@ -415,6 +477,8 @@ function extractInterfaces(spec: any, baseDir: string): Record<string, any> {
       const returns = extractResponses(op, operationId, method, pathStr, spec, baseDir);
 
       interfaces[alias] = {
+        SUMMARY: op.summary || '',
+        DESCRIPTION: op.description || '',
         DESC: generateDesc(op, method, pathStr),
         ENDPOINT: endpoint,
         VISIBILITY: visibility,
@@ -465,6 +529,12 @@ function extractSecurityDefaults(spec: any): any[] {
 }
 
 function generateWrekenfile(spec: any, baseDir: string): string {
+  if (!spec || typeof spec !== 'object') {
+    throw new Error("Argument 'spec' is required and must be an object");
+  }
+  if (!baseDir || typeof baseDir !== 'string') {
+    throw new Error("Argument 'baseDir' is required and must be a string");
+  }
   return dump({
     VERSION: '1.2',
     INIT: {
@@ -477,14 +547,6 @@ function generateWrekenfile(spec: any, baseDir: string): string {
     STRUCTS: extractStructs(spec, baseDir),
   });
 }
-
-// MAIN
-const inputFile = process.argv[2];
-const baseDir = path.dirname(inputFile);
-const openapi = load(fs.readFileSync(inputFile, 'utf8'));
-const output = generateWrekenfile(openapi, baseDir);
-fs.writeFileSync('./Wrekenfile.yaml', output);
-console.log('✅ Wrekenfile generated at ./Wrekenfile.yaml');
 
 // Export for programmatic use
 export { generateWrekenfile };

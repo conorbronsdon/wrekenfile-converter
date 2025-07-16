@@ -24,11 +24,13 @@ interface WrekenfileData {
  * Generates mini Wrekenfiles by grouping interfaces by endpoint
  * Each mini Wrekenfile contains all methods for a single endpoint plus their required structs
  */
-export function generateMiniWrekenfiles(wrekenfilePath: string): MiniWrekenfile[] {
+export function generateMiniWrekenfiles(wrekenfileContent: string): MiniWrekenfile[] {
+  if (!wrekenfileContent || typeof wrekenfileContent !== 'string') {
+    throw new Error("Argument 'wrekenfileContent' is required and must be a string");
+  }
   try {
-    // Read and parse the main Wrekenfile
-    const fileContent = fs.readFileSync(wrekenfilePath, 'utf8');
-    const data = yaml.load(fileContent) as WrekenfileData;
+    // Parse the main Wrekenfile from YAML string
+    const data = yaml.load(wrekenfileContent) as WrekenfileData;
     
     if (!data.INTERFACES) {
       throw new Error('No INTERFACES section found in Wrekenfile');
@@ -59,16 +61,21 @@ function groupInterfacesByEndpoint(interfaces: Record<string, any>): Record<stri
   const groups: Record<string, Record<string, any>> = {};
   
   for (const [interfaceName, interfaceData] of Object.entries(interfaces)) {
-    const endpoint = interfaceData.ENDPOINT;
+    let endpoint = interfaceData.ENDPOINT;
     if (!endpoint) {
       console.warn(`Interface ${interfaceName} has no ENDPOINT, skipping`);
       continue;
     }
-    
+    // Normalize endpoint: remove backticks and trim whitespace
+    if (typeof endpoint === 'string') {
+      endpoint = endpoint.trim();
+      if (endpoint.startsWith('`') && endpoint.endsWith('`')) {
+        endpoint = endpoint.slice(1, -1).trim();
+      }
+    }
     if (!groups[endpoint]) {
       groups[endpoint] = {};
     }
-    
     groups[endpoint][interfaceName] = interfaceData;
   }
   
@@ -134,9 +141,11 @@ function collectRequiredStructs(
     // Check INPUTS
     if (interfaceData.INPUTS) {
       for (const input of interfaceData.INPUTS) {
-        if (input.type && input.type.startsWith('STRUCT(')) {
-          const structName = extractStructName(input.type);
-          if (structName) structRefs.add(structName);
+        if (input.type) {
+          const structNames = extractAllStructNames(input.type);
+          for (const structName of structNames) {
+            if (structName) structRefs.add(structName);
+          }
         }
       }
     }
@@ -144,9 +153,11 @@ function collectRequiredStructs(
     // Check RETURNS
     if (interfaceData.RETURNS) {
       for (const ret of interfaceData.RETURNS) {
-        if (ret.RETURNTYPE && ret.RETURNTYPE.startsWith('STRUCT(')) {
-          const structName = extractStructName(ret.RETURNTYPE);
-          if (structName) structRefs.add(structName);
+        if (ret.RETURNTYPE) {
+          const structNames = extractAllStructNames(ret.RETURNTYPE);
+          for (const structName of structNames) {
+            if (structName) structRefs.add(structName);
+          }
         }
       }
     }
@@ -187,10 +198,13 @@ function collectStructRecursively(
   const structFields = allStructs[structName];
   if (Array.isArray(structFields)) {
     for (const field of structFields) {
-      if (field.type && field.type.startsWith('STRUCT(')) {
-        const nestedStructName = extractStructName(field.type);
-        if (nestedStructName) {
-          collectStructRecursively(nestedStructName, allStructs, requiredStructs, processedStructs);
+      if (field.type) {
+        // Handle STRUCT(SomeStruct) and []STRUCT(SomeStruct)
+        const nestedStructNames = extractAllStructNames(field.type);
+        for (const nestedStructName of nestedStructNames) {
+          if (nestedStructName) {
+            collectStructRecursively(nestedStructName, allStructs, requiredStructs, processedStructs);
+          }
         }
       }
     }
@@ -198,10 +212,24 @@ function collectStructRecursively(
 }
 
 /**
+ * Extracts all struct names from a type string, e.g. STRUCT(SomeStruct), []STRUCT(SomeStruct)
+ */
+function extractAllStructNames(typeString: string): string[] {
+  const matches = [];
+  // Match STRUCT(SomeStruct)
+  const match1 = typeString.match(/^STRUCT\(([^)]+)\)/);
+  if (match1) matches.push(match1[1]);
+  // Match []STRUCT(SomeStruct)
+  const match2 = typeString.match(/^\[\]STRUCT\(([^)]+)\)/);
+  if (match2) matches.push(match2[1]);
+  return matches;
+}
+
+/**
  * Extracts struct name from STRUCT(name) format
  */
 function extractStructName(typeString: string): string | null {
-  const match = typeString.match(/^STRUCT\(([^)]+)\)/);
+  const match = typeString.match(/^STRUCT\(([^)]+)\)/) || typeString.match(/^\[\]STRUCT\(([^)]+)\)/);
   return match ? match[1] : null;
 }
 
@@ -236,35 +264,4 @@ export function saveMiniWrekenfiles(miniWrekenfiles: MiniWrekenfile[], outputDir
   }
 }
 
-/**
- * CLI function for testing
- */
-if (require.main === module) {
-  const args = process.argv.slice(2);
-  if (args.length === 0) {
-    console.log('Usage: node mini-wrekenfile-generator.js <wrekenfile-path> [output-dir]');
-    process.exit(1);
-  }
-  
-  const wrekenfilePath = args[0];
-  const outputDir = args[1] || './mini-wrekenfiles';
-  
-  try {
-    const miniFiles = generateMiniWrekenfiles(wrekenfilePath);
-    console.log(`Generated ${miniFiles.length} mini Wrekenfiles`);
-    
-    // Save to disk
-    saveMiniWrekenfiles(miniFiles, outputDir);
-    
-    // Print metadata
-    for (const miniFile of miniFiles) {
-      console.log(`\n${miniFile.metadata.filename}:`);
-      console.log(`  Endpoint: ${miniFile.metadata.endpoint}`);
-      console.log(`  Methods: ${miniFile.metadata.methods.join(', ')}`);
-      console.log(`  Structs: ${miniFile.metadata.structs.length}`);
-    }
-  } catch (error) {
-    console.error('Error:', error);
-    process.exit(1);
-  }
-} 
+// Only export the main functions at the end. 
