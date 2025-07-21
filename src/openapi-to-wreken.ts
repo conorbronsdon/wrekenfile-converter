@@ -2,6 +2,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { load, dump } from 'js-yaml';
+import { load as yamlLoad } from 'js-yaml';
 
 type Primitive = 'STRING' | 'INT' | 'FLOAT' | 'BOOL' | 'TIMESTAMP' | 'DATE' | 'ANY' | 'UUID';
 const externalRefCache: Record<string, any> = {};
@@ -62,20 +63,20 @@ function resolveRef(ref: string, spec: any, baseDir: string): any {
 }
 
 function getTypeFromSchema(schema: any, spec: any, baseDir: string): string {
+  if (!schema || typeof schema !== 'object') {
+    return 'ANY';
+  }
   if (schema.$ref) {
     const resolvedSchema = resolveRef(schema.$ref, spec, baseDir);
-    // Check if the resolved schema is a simple type
-    if (resolvedSchema.type && resolvedSchema.type !== 'object') {
+    if (resolvedSchema && resolvedSchema.type && resolvedSchema.type !== 'object') {
       return mapType(resolvedSchema.type, resolvedSchema.format);
     }
-    // It's a complex type, use STRUCT
     return `STRUCT(${schema.$ref.split('/').pop()})`;
   }
-  
   if (schema.type === 'array') {
-    if (schema.items?.$ref) {
+    if (schema.items && schema.items.$ref) {
       const resolvedItems = resolveRef(schema.items.$ref, spec, baseDir);
-      if (resolvedItems.type && resolvedItems.type !== 'object') {
+      if (resolvedItems && resolvedItems.type && resolvedItems.type !== 'object') {
         return `[]${mapType(resolvedItems.type, resolvedItems.format)}`;
       }
       return `[]STRUCT(${schema.items.$ref.split('/').pop()})`;
@@ -83,11 +84,9 @@ function getTypeFromSchema(schema: any, spec: any, baseDir: string): string {
       return `[]${mapType(schema.items?.type)}`;
     }
   }
-  
   if (schema.type && schema.type !== 'object') {
     return mapType(schema.type, schema.format);
   }
-  
   return 'ANY';
 }
 
@@ -153,46 +152,46 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
   
   // Helper to recursively collect all referenced schemas, traversing all properties, arrays, and combiners
   function collectAllReferencedSchemas(schema: any, name: string) {
-    if (!name || structs[name]) return;
+    if (!schema || typeof schema !== 'object' || !name || structs[name]) return;
     const resolved = schema.$ref ? resolveRef(schema.$ref, spec, baseDir) : schema;
     const fields = parseSchema(name, resolved, spec, baseDir);
     structs[name] = fields;
 
     // Traverse all properties
-    if (resolved.type === 'object' && resolved.properties) {
+    if (resolved && resolved.type === 'object' && resolved.properties && typeof resolved.properties === 'object') {
       for (const [propName, prop] of Object.entries<any>(resolved.properties)) {
-        if (prop.$ref) {
+        if (prop && typeof prop === 'object' && prop.$ref) {
           const refName = prop.$ref.split('/').pop();
           if (refName) collectAllReferencedSchemas(resolveRef(prop.$ref, spec, baseDir), refName);
-        } else if (prop.type === 'array' && prop.items) {
-          if (prop.items.$ref) {
+        } else if (prop && typeof prop === 'object' && prop.type === 'array' && prop.items) {
+          if (prop.items && typeof prop.items === 'object' && prop.items.$ref) {
             const refName = prop.items.$ref.split('/').pop();
             if (refName) collectAllReferencedSchemas(resolveRef(prop.items.$ref, spec, baseDir), refName);
-          } else if (prop.items.type === 'object' || prop.items.properties || prop.items.allOf || prop.items.oneOf || prop.items.anyOf) {
+          } else if (prop.items && typeof prop.items === 'object' && (prop.items.type === 'object' || prop.items.properties || prop.items.allOf || prop.items.oneOf || prop.items.anyOf)) {
             collectAllReferencedSchemas(prop.items, name + '_' + propName + '_Item');
           }
-        } else if (prop.type === 'object' || prop.properties || prop.allOf || prop.oneOf || prop.anyOf) {
+        } else if (prop && typeof prop === 'object' && (prop.type === 'object' || prop.properties || prop.allOf || prop.oneOf || prop.anyOf)) {
           collectAllReferencedSchemas(prop, name + '_' + propName);
         }
       }
     }
     // Traverse array items at root
-    if (resolved.type === 'array' && resolved.items) {
-      if (resolved.items.$ref) {
+    if (resolved && resolved.type === 'array' && resolved.items) {
+      if (resolved.items && typeof resolved.items === 'object' && resolved.items.$ref) {
         const refName = resolved.items.$ref.split('/').pop();
         if (refName) collectAllReferencedSchemas(resolveRef(resolved.items.$ref, spec, baseDir), refName);
-      } else if (resolved.items.type === 'object' || resolved.items.properties || resolved.items.allOf || resolved.items.oneOf || resolved.items.anyOf) {
+      } else if (resolved.items && typeof resolved.items === 'object' && (resolved.items.type === 'object' || resolved.items.properties || resolved.items.allOf || resolved.items.oneOf || resolved.items.anyOf)) {
         collectAllReferencedSchemas(resolved.items, name + '_Item');
       }
     }
     // Traverse allOf/oneOf/anyOf
     for (const combiner of ['allOf', 'oneOf', 'anyOf']) {
-      if (Array.isArray(resolved[combiner])) {
+      if (resolved && Array.isArray(resolved[combiner])) {
         for (const subSchema of resolved[combiner]) {
-          if (subSchema.$ref) {
+          if (subSchema && typeof subSchema === 'object' && subSchema.$ref) {
             const refName = subSchema.$ref.split('/').pop();
             if (refName) collectAllReferencedSchemas(resolveRef(subSchema.$ref, spec, baseDir), refName);
-          } else {
+          } else if (subSchema && typeof subSchema === 'object') {
             collectAllReferencedSchemas(subSchema, name + '_' + combiner);
           }
         }
@@ -204,7 +203,7 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
   for (const name in schemas) {
     collectAllReferencedSchemas(schemas[name], name);
     const schema = schemas[name];
-    if (schema.oneOf || schema.anyOf) {
+    if (schema && (schema.oneOf || schema.anyOf)) {
       structs[`${name}_Union`] = [{ name: 'value', type: 'ANY', required: 'FALSE' }];
     }
   }
@@ -213,32 +212,30 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
   for (const [pathStr, methods] of Object.entries<any>(spec.paths)) {
     for (const [method, op] of Object.entries<any>(methods)) {
       const operationId = op.operationId || `${method}-${pathStr.replace(/[\/{}]/g, '-')}`;
-      
       // Extract request body schemas
       if (op.requestBody?.content) {
         for (const [contentType, content] of Object.entries<any>(op.requestBody.content)) {
-          if (content.schema) {
-            if (content.schema.$ref) {
+          if (content && content.schema) {
+            if (content.schema && content.schema.$ref) {
               const refName = content.schema.$ref.split('/').pop();
               if (refName) collectAllReferencedSchemas(resolveRef(content.schema.$ref, spec, baseDir), refName);
-            } else {
+            } else if (content.schema && typeof content.schema === 'object') {
               const requestStructName = generateStructName(operationId, method, pathStr, 'Request');
               collectAllReferencedSchemas(content.schema, requestStructName);
             }
           }
         }
       }
-      
       // Extract response schemas
       if (op.responses) {
         for (const [code, response] of Object.entries<any>(op.responses)) {
-          if (response.content) {
+          if (response && response.content) {
             for (const [contentType, content] of Object.entries<any>(response.content)) {
-              if (content.schema) {
-                if (content.schema.$ref) {
+              if (content && content.schema) {
+                if (content.schema && content.schema.$ref) {
                   const refName = content.schema.$ref.split('/').pop();
                   if (refName) collectAllReferencedSchemas(resolveRef(content.schema.$ref, spec, baseDir), refName);
-                } else {
+                } else if (content.schema && typeof content.schema === 'object') {
                   const responseStructName = generateStructName(operationId, method, pathStr, `Response${code}`);
                   collectAllReferencedSchemas(content.schema, responseStructName);
                 }
@@ -369,36 +366,32 @@ function extractParameters(op: any, spec: any, baseDir: string): any[] {
 function extractRequestBody(op: any, operationId: string, method: string, path: string, spec: any, baseDir: string): any[] {
   const inputParams: any[] = [];
   const requestBody = op.requestBody;
-  
   if (!requestBody?.content) {
     return inputParams;
   }
-
   const contentTypes = Object.keys(requestBody.content);
   const contentType = contentTypes[0];
-  
   if (contentType === 'application/json' && requestBody.content[contentType]?.schema) {
     const bodySchema = requestBody.content[contentType].schema;
     let type: string;
-
-    if (bodySchema.$ref) {
+    if (bodySchema && bodySchema.$ref) {
       type = getTypeFromSchema(bodySchema, spec, baseDir);
-    } else {
+    } else if (bodySchema) {
       const requestStructName = generateStructName(operationId, method, path, 'Request');
       type = `STRUCT(${requestStructName})`;
+    } else {
+      type = 'ANY';
     }
-    
     inputParams.push({
       name: 'body',
       type,
       required: requestBody.required ? 'TRUE' : 'FALSE',
     });
-
   } else if (contentType === 'multipart/form-data' && requestBody.content[contentType]?.schema) {
     const bodySchema = requestBody.content[contentType].schema;
-    if (bodySchema.properties) {
+    if (bodySchema && bodySchema.properties) {
       for (const [key, prop] of Object.entries<any>(bodySchema.properties)) {
-        const type = prop.format === 'binary' ? 'FILE' : getTypeFromSchema(prop, spec, baseDir);
+        const type = prop && prop.format === 'binary' ? 'FILE' : getTypeFromSchema(prop, spec, baseDir);
         const required = (bodySchema.required || []).includes(key) ? 'TRUE' : 'FALSE';
         inputParams.push({
           name: key,
@@ -408,7 +401,6 @@ function extractRequestBody(op: any, operationId: string, method: string, path: 
       }
     }
   }
-  
   return inputParams;
 }
 
@@ -528,6 +520,39 @@ function extractSecurityDefaults(spec: any): any[] {
   return defs;
 }
 
+function cleanYaml(yamlString: string): string {
+  return yamlString
+    .replace(/\t/g, '  ')
+    .replace(/[\u00A0]/g, ' ')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\r\n/g, '\n');
+}
+
+function checkYamlForHiddenChars(yamlString: string): void {
+  const lines = yamlString.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/\t/.test(line)) {
+      throw new Error(`YAML contains a TAB character at line ${i + 1}:\n${line}`);
+    }
+    if (/\u00A0/.test(line)) {
+      throw new Error(`YAML contains a non-breaking space (U+00A0) at line ${i + 1}:\n${line}`);
+    }
+    if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(line)) {
+      throw new Error(`YAML contains a non-printable character at line ${i + 1}:\n${line}`);
+    }
+  }
+}
+
+function validateYaml(yamlString: string): void {
+  try {
+    yamlLoad(yamlString);
+  } catch (e) {
+    throw new Error('Generated YAML is invalid: ' + (e as any).message);
+  }
+}
+
 function generateWrekenfile(spec: any, baseDir: string): string {
   if (!spec || typeof spec !== 'object') {
     throw new Error("Argument 'spec' is required and must be an object");
@@ -535,7 +560,7 @@ function generateWrekenfile(spec: any, baseDir: string): string {
   if (!baseDir || typeof baseDir !== 'string') {
     throw new Error("Argument 'baseDir' is required and must be a string");
   }
-  return dump({
+  let yamlString = dump({
     VERSION: '1.2',
     INIT: {
       DEFAULTS: [
@@ -546,6 +571,10 @@ function generateWrekenfile(spec: any, baseDir: string): string {
     INTERFACES: extractInterfaces(spec, baseDir),
     STRUCTS: extractStructs(spec, baseDir),
   });
+  yamlString = cleanYaml(yamlString);
+  checkYamlForHiddenChars(yamlString);
+  validateYaml(yamlString);
+  return yamlString;
 }
 
 // Export for programmatic use

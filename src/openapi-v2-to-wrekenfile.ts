@@ -2,6 +2,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { load, dump } from 'js-yaml';
+import { load as yamlLoad } from 'js-yaml';
 
 type Primitive = 'STRING' | 'INT' | 'FLOAT' | 'BOOL' | 'TIMESTAMP' | 'DATE' | 'ANY' | 'UUID';
 const externalRefCache: Record<string, any> = {};
@@ -63,9 +64,13 @@ function resolveRef(ref: string, spec: any, baseDir: string): any {
 
 function parseSchema(name: string, schema: any, spec: any, baseDir: string, depth = 0): any[] {
   if (depth > 3) return [];
-  if (schema.$ref) return parseSchema(name, resolveRef(schema.$ref, spec, baseDir), spec, baseDir, depth + 1);
-  if (schema.allOf) return schema.allOf.flatMap((s: any) => parseSchema(name, s, spec, baseDir, depth + 1));
-  if (schema.oneOf || schema.anyOf) {
+  if (schema && typeof schema === 'object' && schema.$ref) {
+    return parseSchema(name, resolveRef(schema.$ref, spec, baseDir), spec, baseDir, depth + 1);
+  }
+  if (schema && typeof schema === 'object' && schema.allOf) {
+    return schema.allOf.flatMap((s: any) => parseSchema(name, s, spec, baseDir, depth + 1));
+  }
+  if (schema && typeof schema === 'object' && (schema.oneOf || schema.anyOf)) {
     return [{
       name: 'variant',
       type: `STRUCT(${name}_Union)`,
@@ -74,18 +79,18 @@ function parseSchema(name: string, schema: any, spec: any, baseDir: string, dept
   }
 
   // Handle primitive types - return empty array (no struct needed)
-  if (schema.type && schema.type !== 'object' && schema.type !== 'array') {
+  if (schema && typeof schema === 'object' && schema.type && schema.type !== 'object' && schema.type !== 'array') {
     return [];
   }
 
   // Handle empty objects (no properties) - return empty array
-  if (schema.type === 'object' && (!schema.properties || Object.keys(schema.properties).length === 0)) {
+  if (schema && typeof schema === 'object' && schema.type === 'object' && (!schema.properties || Object.keys(schema.properties).length === 0)) {
     return [];
   }
 
   const fields: any[] = [];
 
-  if (schema.discriminator?.propertyName) {
+  if (schema && typeof schema === 'object' && schema.discriminator?.propertyName) {
     fields.push({
       name: schema.discriminator.propertyName,
       type: 'STRING',
@@ -93,14 +98,15 @@ function parseSchema(name: string, schema: any, spec: any, baseDir: string, dept
     });
   }
 
-  if (schema.type === 'object' && schema.properties) {
+  if (schema && typeof schema === 'object' && schema.type === 'object' && schema.properties) {
     for (const [key, prop] of Object.entries<any>(schema.properties)) {
       let type = 'ANY';
-      if (prop.$ref) type = `STRUCT(${prop.$ref.split('/').pop()})`;
-      else if (prop.type === 'array') {
-        if (prop.items?.$ref) {
+      if (prop && typeof prop === 'object' && prop.$ref) {
+        type = `STRUCT(${prop.$ref.split('/').pop()})`;
+      } else if (prop && typeof prop === 'object' && prop.type === 'array') {
+        if (prop && typeof prop === 'object' && prop.items && prop.items.$ref) {
           type = `[]STRUCT(${prop.items.$ref.split('/').pop()})`;
-        } else {
+        } else if (prop && typeof prop === 'object' && prop.items) {
           type = `[]${mapType(prop.items?.type)}`;
         }
       } else {
@@ -139,7 +145,7 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
     const fields = parseSchema(name, definitions[name], spec, baseDir);
     // Always add the struct, even if empty
     structs[name] = fields;
-    if (definitions[name].oneOf || definitions[name].anyOf) {
+    if (definitions[name] && typeof definitions[name] === 'object' && (definitions[name].oneOf || definitions[name].anyOf)) {
       structs[`${name}_Union`] = [{ name: 'value', type: 'ANY', required: 'OPTIONAL' }];
     }
   }
@@ -152,7 +158,7 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
       // Extract request body schemas (OpenAPI v2 uses parameters with in: body)
       if (op.parameters) {
         for (const param of op.parameters) {
-          if (param.in === 'body' && param.schema && !param.schema.$ref) {
+          if (param && typeof param === 'object' && param.in === 'body' && param.schema && !param.schema.$ref) {
             // Inline schema - create a struct for it only if it has fields
             const requestStructName = generateStructName(operationId, method, pathStr, 'Request');
             const fields = parseSchema(requestStructName, param.schema, spec, baseDir);
@@ -166,7 +172,7 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
       // Extract response schemas (OpenAPI v2 has schema directly in response)
       if (op.responses) {
         for (const [code, response] of Object.entries<any>(op.responses)) {
-          if (response.schema && !response.schema.$ref) {
+          if (response && typeof response === 'object' && response.schema && !response.schema.$ref) {
             // Inline schema - create a struct for it only if it has fields
             const responseStructName = generateStructName(operationId, method, pathStr, `Response${code}`);
             const fields = parseSchema(responseStructName, response.schema, spec, baseDir);
@@ -184,7 +190,7 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
 
 function getContentTypeAndBodyType(op: any): { contentType: string; bodyType: string } {
   // Check if there are formData parameters
-  const hasFormData = op.parameters?.some((param: any) => param.in === 'formData');
+  const hasFormData = op.parameters?.some((param: any) => param && typeof param === 'object' && param.in === 'formData');
   
   if (hasFormData) {
     return { contentType: 'multipart/form-data', bodyType: 'FORM' };
@@ -243,7 +249,7 @@ function getHeadersForOperation(op: any, spec: any): Record<string, string>[] {
   // Check if Authorization is used as a parameter but not defined in securityDefinitions
   if (op.parameters) {
     for (const param of op.parameters) {
-      if (param.in === 'header' && param.name === 'Authorization' && !headerMap.has('Authorization')) {
+      if (param && typeof param === 'object' && param.in === 'header' && param.name === 'Authorization' && !headerMap.has('Authorization')) {
         headerMap.set('Authorization', 'bearer_token');
       }
     }
@@ -268,7 +274,7 @@ function extractParameters(op: any, spec: any): any[] {
   if (op.parameters) {
     for (let param of op.parameters) {
       // Resolve parameter references
-      if (param.$ref) {
+      if (param && typeof param === 'object' && param.$ref) {
         if (!spec.swaggerFile) {
           throw new Error("spec.swaggerFile is undefined. Please provide a valid baseDir when calling generateWrekenfile, or ensure all refs are internal.");
         }
@@ -276,19 +282,19 @@ function extractParameters(op: any, spec: any): any[] {
       }
       
       // Skip body and formData parameters, they are handled in extractRequestBody
-      if (param.in === 'body' || param.in === 'formData') {
+      if (param && typeof param === 'object' && (param.in === 'body' || param.in === 'formData')) {
         continue;
       }
       
-      const paramType = param.in || 'query';
-      const paramName = param.name;
-      const paramSchema = param.schema || {}; // Schema is sometimes at root of param
-      const paramRequired = param.required ? 'REQUIRED' : 'OPTIONAL';
+      const paramType = param && typeof param === 'object' ? param.in || 'query' : 'query';
+      const paramName = param && typeof param === 'object' ? param.name : '';
+      const paramSchema = param && typeof param === 'object' ? param.schema || {} : {}; // Schema is sometimes at root of param
+      const paramRequired = param && typeof param === 'object' ? param.required ? 'REQUIRED' : 'OPTIONAL' : 'OPTIONAL';
       
       let type = 'STRING';
-      if (param.type) {
+      if (param && typeof param === 'object' && param.type) {
         type = mapType(param.type, param.format);
-      } else if (paramSchema.type) {
+      } else if (paramSchema && typeof paramSchema === 'object' && paramSchema.type) {
         type = mapType(paramSchema.type, paramSchema.format);
       }
       
@@ -306,11 +312,11 @@ function extractParameters(op: any, spec: any): any[] {
 
 function extractRequestBody(op: any, operationId: string, method: string, path: string): any[] {
   const inputParams: any[] = [];
-  const bodyParam = (op.parameters || []).find((p: any) => p.in === 'body');
+  const bodyParam = (op.parameters || []).find((p: any) => p && typeof p === 'object' && p.in === 'body');
 
   if (bodyParam) {
     let type: string;
-    if (bodyParam.schema?.$ref) {
+    if (bodyParam && typeof bodyParam === 'object' && bodyParam.schema?.$ref) {
       type = `STRUCT(${bodyParam.schema.$ref.split('/').pop()})`;
     } else {
       // Inline schema - use generated struct name
@@ -320,18 +326,18 @@ function extractRequestBody(op: any, operationId: string, method: string, path: 
     inputParams.push({
       name: 'body',
       type,
-      required: bodyParam.required ? 'REQUIRED' : 'OPTIONAL',
+      required: bodyParam && typeof bodyParam === 'object' ? bodyParam.required ? 'REQUIRED' : 'OPTIONAL' : 'OPTIONAL',
     });
   }
   
   // Handle formData for multipart/form-data
   if (op.parameters) {
     for (const param of op.parameters) {
-      if (param.in === 'formData') {
+      if (param && typeof param === 'object' && param.in === 'formData') {
         inputParams.push({
-          name: param.name,
-          type: param.type === 'file' ? 'FILE' : mapType(param.type, param.format),
-          required: param.required ? 'REQUIRED' : 'OPTIONAL',
+          name: param && typeof param === 'object' ? param.name : '',
+          type: param && typeof param === 'object' ? param.type === 'file' ? 'FILE' : mapType(param.type, param.format) : 'STRING',
+          required: param && typeof param === 'object' ? param.required ? 'REQUIRED' : 'OPTIONAL' : 'OPTIONAL',
         });
       }
     }
@@ -346,21 +352,21 @@ function extractResponses(op: any, operationId: string, method: string, path: st
   // Handle all response codes (success and error)
   for (const [code, response] of Object.entries<any>(op.responses || {})) {
     let returnType = 'ANY';
-    if (response.schema) {
-      if (response.schema.$ref) {
+    if (response && typeof response === 'object' && response.schema) {
+      if (response && typeof response === 'object' && response.schema.$ref) {
         returnType = `STRUCT(${response.schema.$ref.split('/').pop()})`;
-      } else if (response.schema.type === 'array') {
-        if (response.schema.items?.$ref) {
+      } else if (response && typeof response === 'object' && response.schema.type === 'array') {
+        if (response && typeof response === 'object' && response.schema.items?.$ref) {
           returnType = `[]STRUCT(${response.schema.items.$ref.split('/').pop()})`;
-        } else {
+        } else if (response && typeof response === 'object' && response.schema.items) {
           returnType = `[]${mapType(response.schema.items?.type)}`;
         }
-      } else if (response.schema.type === 'object') {
+      } else if (response && typeof response === 'object' && response.schema.type === 'object') {
         // Inline schema - use generated struct name
         const responseStructName = generateStructName(operationId, method, path, `Response${code}`);
         returnType = `STRUCT(${responseStructName})`;
       }
-    } else if (code === '204' || response.description === 'No Content') {
+    } else if (code === '204' || response && typeof response === 'object' && response.description === 'No Content') {
       returnType = 'VOID';
     }
 
@@ -393,7 +399,7 @@ function extractInterfaces(spec: any): Record<string, any> {
       const endpoint = pathStr.includes('{') ? `\`${base}${pathStr}\`` : `${base}${pathStr}`;
       
       // Check if operation is hidden from docs
-      const isPrivate = op['x-hidden-from-docs'] === true;
+      const isPrivate = op && typeof op === 'object' && op['x-hidden-from-docs'] === true;
       const visibility = isPrivate ? 'PRIVATE' : 'PUBLIC';
       
       const { bodyType } = getContentTypeAndBodyType(op);
@@ -427,20 +433,53 @@ function extractSecurityDefaults(spec: any): any[] {
   const securityDefinitions = spec.securityDefinitions || {};
   
   for (const [name, scheme] of Object.entries<any>(securityDefinitions)) {
-    if (scheme.type === 'basic') {
+    if (scheme && typeof scheme === 'object' && scheme.type === 'basic') {
       defs.push({ basic_auth: 'Basic <BASE64>' });
-    } else if (scheme.type === 'apiKey') {
-      if (scheme.in === 'header') {
+    } else if (scheme && typeof scheme === 'object' && scheme.type === 'apiKey') {
+      if (scheme && typeof scheme === 'object' && scheme.in === 'header') {
         defs.push({ [scheme.name.toLowerCase()]: `<${scheme.name.toUpperCase()}>` });
-      } else if (scheme.in === 'query') {
+      } else if (scheme && typeof scheme === 'object' && scheme.in === 'query') {
         defs.push({ [`query_${scheme.name.toLowerCase()}`]: `<${scheme.name.toUpperCase()}>` });
       }
-    } else if (scheme.type === 'oauth2') {
+    } else if (scheme && typeof scheme === 'object' && scheme.type === 'oauth2') {
       defs.push({ bearer_token: 'BEARER <ACCESS_TOKEN>' });
     }
   }
   
   return defs;
+}
+
+function cleanYaml(yamlString: string): string {
+  return yamlString
+    .replace(/\t/g, '  ')
+    .replace(/[\u00A0]/g, ' ')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\r\n/g, '\n');
+}
+
+function checkYamlForHiddenChars(yamlString: string): void {
+  const lines = yamlString.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/\t/.test(line)) {
+      throw new Error(`YAML contains a TAB character at line ${i + 1}:\n${line}`);
+    }
+    if (/\u00A0/.test(line)) {
+      throw new Error(`YAML contains a non-breaking space (U+00A0) at line ${i + 1}:\n${line}`);
+    }
+    if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(line)) {
+      throw new Error(`YAML contains a non-printable character at line ${i + 1}:\n${line}`);
+    }
+  }
+}
+
+function validateYaml(yamlString: string): void {
+  try {
+    yamlLoad(yamlString);
+  } catch (e) {
+    throw new Error('Generated YAML is invalid: ' + (e as any).message);
+  }
 }
 
 function generateWrekenfile(spec: any, baseDir: string): string {
@@ -453,7 +492,7 @@ function generateWrekenfile(spec: any, baseDir: string): string {
   // Add swaggerFile path to spec for ref resolution
   spec.swaggerFile = baseDir;
 
-  return dump({
+  let yamlString = dump({
     VERSION: '1.2',
     INIT: {
       DEFAULTS: [
@@ -464,6 +503,10 @@ function generateWrekenfile(spec: any, baseDir: string): string {
     INTERFACES: extractInterfaces(spec),
     STRUCTS: extractStructs(spec, baseDir),
   }, { noArrayIndent: true });
+  yamlString = cleanYaml(yamlString);
+  checkYamlForHiddenChars(yamlString);
+  validateYaml(yamlString);
+  return yamlString;
 }
 
 // Export for programmatic use

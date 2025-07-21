@@ -77,6 +77,30 @@ const variables = {}; // Optionally provide Postman environment variables
 const wrekenfileYaml = generateWrekenfileFromPostman(collection, variables);
 ```
 
+---
+
+## CLI: Convert Postman Collection to Wrekenfile (Local/Dev Only)
+
+A standalone CLI script is provided for local development to convert a Postman collection JSON to a Wrekenfile YAML file. This script is **not included in the published library** and is safe to use only in your own repo.
+
+**Usage:**
+
+```bash
+npx ts-node src/cli/cli-postman-to-wrekenfile.ts <postman_collection.json> <output_wrekenfile.yaml> [postman_environment.json]
+```
+
+Real example
+
+```
+npx ts-node src/cli/cli-postman-to-wrekenfile.ts examples/transact_bridge_postman.json wrekenfile.yaml
+```
+
+- The third argument (environment file) is optional.
+- Prints helpful usage and error messages.
+- Does not affect library builds or usage as a dependency.
+
+---
+
 ### Validate a Wrekenfile
 
 ```typescript
@@ -183,3 +207,42 @@ mini-wrekenfiles/               # Generated mini chunks (if you save them)
 ## License
 
 MIT 
+
+# Wrekenfile Tools
+
+## Generate Wrekenfile from OpenAPI
+
+You can generate a Wrekenfile YAML from an OpenAPI (YAML or JSON) spec using the CLI:
+
+```
+npx ts-node src/cli/cli-openapi-to-wrekenfile.ts --input <openapi.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]
+```
+
+- `--input` or `-i`: Path to your OpenAPI YAML or JSON file (required)
+- `--output` or `-o`: Path to output Wrekenfile YAML (optional, defaults to `output_wrekenfile.yaml`)
+- `--cwd`: Working directory for resolving $refs (optional, defaults to the input file's directory)
+
+**Example:**
+```
+npx ts-node src/cli/cli-openapi-to-wrekenfile.ts --input examples/p3id_swagger.json --output wrekenfile.yaml --cwd .
+```
+
+---
+
+## Generate Mini Wrekenfiles from a Wrekenfile
+
+You can generate mini Wrekenfiles for each endpoint from a main Wrekenfile YAML using the CLI:
+
+```
+npx ts-node src/cli/cli-mini-wrekenfile-generator.ts --input <wrekenfile.yaml> [--output <dir>]
+```
+
+- `--input` or `-i`: Path to your main Wrekenfile YAML (required)
+- `--output` or `-o`: Output directory for mini Wrekenfiles (optional, defaults to `./mini-wrekenfiles`)
+
+**Example:**
+```
+npx ts-node src/cli/cli-mini-wrekenfile-generator.ts --input wrekenfile.yaml --output ./mini-wrekenfiles
+```
+
+This will generate one mini Wrekenfile per endpoint in the specified output directory. 
