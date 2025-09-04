@@ -411,8 +411,8 @@ function extractInterfaces(spec: any): Record<string, any> {
 
       interfaces[alias] = {
         SUMMARY: op.summary || '',
-        DESCRIPTION: op.description || '',
         DESC: generateDesc(op, method, pathStr),
+        TAGS: Array.isArray(op.tags) ? op.tags : [],
         ENDPOINT: endpoint,
         VISIBILITY: visibility,
         HTTP: {

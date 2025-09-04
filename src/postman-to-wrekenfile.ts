@@ -23,11 +23,20 @@ function mapType(value: any): Primitive {
   return 'ANY';
 }
 
-function generateDesc(item: any, method: string, path: string): string {
-  if (item.description) {
-    // Remove HTML tags and clean up description
-    return item.description.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
+function getItemDescription(item: any): string {
+  let description: any = item?.description ?? item?.request?.description ?? item?.request?.body?.description;
+  if (!description) return '';
+  // Postman can store description as an object with { content: string }
+  if (typeof description === 'object' && typeof description.content === 'string') {
+    description = description.content;
   }
+  if (typeof description !== 'string') return '';
+  return description.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
+}
+
+function generateDesc(item: any, method: string, path: string): string {
+  const cleaned = getItemDescription(item);
+  if (cleaned) return cleaned;
   return `${method.toUpperCase()} ${path}`;
 }
 
@@ -399,12 +408,13 @@ function extractOperations(collection: any, variables: Record<string, string>): 
     }
   }
   
-  function processItem(item: any) {
+  function processItem(item: any, parentName: string | null = null) {
     if (item.request) {
       const method = item.request.method || 'GET';
       const url = item.request.url;
       const path = extractPathFromUrl(url, variables);
       const itemName = item.name || 'unknown';
+      const immediateParentName = parentName || null;
       // Generate operation ID
       let operationId = itemName.toLowerCase().replace(/[^a-z0-9]/g, '-');
       operationId = getUniqueOperationName(operationId);
@@ -420,8 +430,8 @@ function extractOperations(collection: any, variables: Record<string, string>): 
       operations.push({
         name: operationId,
         SUMMARY: itemName || '',
-        DESCRIPTION: item.description ? item.description.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim() : '',
         DESC: generateDesc(item, method, path),
+        TAGS: immediateParentName ? [immediateParentName] : (itemName ? [itemName] : []),
         ENDPOINT: `"/${path}"`,
         VISIBILITY: 'PUBLIC',
         HTTP: {
@@ -435,12 +445,12 @@ function extractOperations(collection: any, variables: Record<string, string>): 
     }
     if (item.item) {
       for (const subItem of item.item) {
-        processItem(subItem);
+        processItem(subItem, item.name || parentName || null);
       }
     }
   }
   for (const item of collection.item) {
-    processItem(item);
+    processItem(item, null);
   }
   return operations;
 }
@@ -509,13 +519,23 @@ function generateWrekenfile(collection: any, variables: Record<string, string>):
   wrekenfile += `INTERFACES:\n`;
   for (const operation of operations) {
     wrekenfile += `  ${operation.name}:\n`;
-    // Quote SUMMARY and DESCRIPTION if they contain special characters
+    // Quote SUMMARY and DESC if they contain special characters
     const summary = operation.SUMMARY.includes(':') || operation.SUMMARY.includes('"') ? `"${operation.SUMMARY.replace(/"/g, '\\"')}"` : operation.SUMMARY;
-    const description = operation.DESCRIPTION.includes(':') || operation.DESCRIPTION.includes('"') ? `"${operation.DESCRIPTION.replace(/"/g, '\\"')}"` : operation.DESCRIPTION;
     const desc = operation.DESC.includes(':') || operation.DESC.includes('"') ? `"${operation.DESC.replace(/"/g, '\\"')}"` : operation.DESC;
     wrekenfile += `    SUMMARY: ${summary}\n`;
-    wrekenfile += `    DESCRIPTION: ${description}\n`;
     wrekenfile += `    DESC: ${desc}\n`;
+    // TAGS
+    if (!operation.TAGS || operation.TAGS.length === 0) {
+      wrekenfile += `    TAGS: []\n`;
+    } else {
+      wrekenfile += `    TAGS:\n`;
+      for (const tag of operation.TAGS) {
+        const tagVal = (typeof tag === 'string' && (tag.includes(':') || tag.includes('"')))
+          ? `"${String(tag).replace(/"/g, '\\"')}"`
+          : String(tag);
+        wrekenfile += `      - ${tagVal}\n`;
+      }
+    }
     wrekenfile += `    ENDPOINT: ${operation.ENDPOINT}\n`;
     wrekenfile += `    VISIBILITY: ${operation.VISIBILITY}\n`;
     wrekenfile += `    HTTP:\n`;
