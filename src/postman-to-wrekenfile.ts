@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { load as yamlLoad } from 'js-yaml';
 
 type Primitive = 'STRING' | 'INT' | 'FLOAT' | 'BOOL' | 'TIMESTAMP' | 'DATE' | 'ANY' | 'UUID';
 
@@ -22,11 +23,20 @@ function mapType(value: any): Primitive {
   return 'ANY';
 }
 
-function generateDesc(item: any, method: string, path: string): string {
-  if (item.description) {
-    // Remove HTML tags and clean up description
-    return item.description.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
+function getItemDescription(item: any): string {
+  let description: any = item?.description ?? item?.request?.description ?? item?.request?.body?.description;
+  if (!description) return '';
+  // Postman can store description as an object with { content: string }
+  if (typeof description === 'object' && typeof description.content === 'string') {
+    description = description.content;
   }
+  if (typeof description !== 'string') return '';
+  return description.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
+}
+
+function generateDesc(item: any, method: string, path: string): string {
+  const cleaned = getItemDescription(item);
+  if (cleaned) return cleaned;
   return `${method.toUpperCase()} ${path}`;
 }
 
@@ -56,16 +66,26 @@ function extractFieldsFromObject(obj: any, depth = 0, prefix = ''): any[] {
   if (typeof obj !== 'object') return [];
 
   const fields: any[] = [];
+  const keyCount: Record<string, number> = {};
 
   for (const [key, value] of Object.entries(obj)) {
     let type = 'ANY';
     let required = 'OPTIONAL';
 
+    // Handle duplicate keys
+    let fieldName = key;
+    if (keyCount[key] === undefined) {
+      keyCount[key] = 1;
+    } else {
+      keyCount[key] += 1;
+      fieldName = `${key} ${keyCount[key]}`;
+    }
+
     if (Array.isArray(value)) {
       if (value.length > 0) {
         const firstItem = value[0];
         if (typeof firstItem === 'object' && firstItem !== null) {
-          type = `[]STRUCT(${prefix}${key}Item)`;
+          type = `[]STRUCT(${prefix}${fieldName}Item)`;
         } else {
           type = `[]${mapType(firstItem)}`;
         }
@@ -73,13 +93,13 @@ function extractFieldsFromObject(obj: any, depth = 0, prefix = ''): any[] {
         type = '[]ANY';
       }
     } else if (typeof value === 'object' && value !== null) {
-      type = `STRUCT(${prefix}${key})`;
+      type = `STRUCT(${prefix}${fieldName})`;
     } else {
       type = mapType(value);
     }
 
     fields.push({
-      name: key,
+      name: fieldName,
       type,
       required,
     });
@@ -135,6 +155,17 @@ function resolveVariables(value: string, variables: Record<string, string>): str
 
 function extractStructs(collection: any, variables: Record<string, string>): Record<string, any[]> {
   const structs: Record<string, any[]> = {};
+  const structNameCount: Record<string, number> = {};
+
+  function getUniqueStructName(name: string): string {
+    if (structs[name] === undefined) {
+      structNameCount[name] = 1;
+      return name;
+    } else {
+      structNameCount[name] = (structNameCount[name] || 1) + 1;
+      return `${name} ${structNameCount[name]}`;
+    }
+  }
   
   function processItem(item: any) {
     if (item.request) {
@@ -147,52 +178,42 @@ function extractStructs(collection: any, variables: Record<string, string>): Rec
       if (item.request.body?.mode === 'raw' && item.request.body.raw) {
         const bodyData = parseJsonExample(item.request.body.raw);
         if (bodyData) {
-          const requestStructName = generateStructName(itemName, method, path, 'Request');
+          let requestStructName = generateStructName(itemName, method, path, 'Request');
+          requestStructName = getUniqueStructName(requestStructName);
           const fields = extractFieldsFromObject(bodyData, 0, requestStructName);
-          // Always add the struct, even if empty
           structs[requestStructName] = fields.length > 0 ? fields : [];
-          // Extract nested structs from request body
           extractNestedStructs(bodyData, structs, requestStructName);
         }
       }
-      
       // Extract response structs from examples
       if (item.response) {
         for (const response of item.response) {
-          const responseStructName = generateStructName(itemName, method, path, `Response${response.code || '200'}`);
+          let responseStructName = generateStructName(itemName, method, path, `Response${response.code || '200'}`);
+          responseStructName = getUniqueStructName(responseStructName);
           if (response.body) {
             const responseData = parseJsonExample(response.body);
             if (responseData) {
               const fields = extractFieldsFromObject(responseData, 0, responseStructName);
-              // Always add the struct, even if empty
               structs[responseStructName] = fields.length > 0 ? fields : [];
-              // Extract nested structs from response body
               extractNestedStructs(responseData, structs, responseStructName);
             } else {
-              // If body is not valid JSON or empty, create an empty struct
               structs[responseStructName] = [];
             }
           } else {
-            // If no body at all, still create an empty struct
             structs[responseStructName] = [];
           }
         }
       }
     }
-    
-    // Recursively process nested items
     if (item.item) {
       for (const subItem of item.item) {
         processItem(subItem);
       }
     }
   }
-  
-  // Process all items in the collection
   for (const item of collection.item) {
     processItem(item);
   }
-  
   return structs;
 }
 
@@ -375,34 +396,42 @@ function extractResponses(item: any, itemName: string, method: string, path: str
 
 function extractOperations(collection: any, variables: Record<string, string>): any[] {
   const operations: any[] = [];
+  const operationNameCount: Record<string, number> = {};
+
+  function getUniqueOperationName(name: string): string {
+    if (operationNameCount[name] === undefined) {
+      operationNameCount[name] = 1;
+      return name;
+    } else {
+      operationNameCount[name] += 1;
+      return `${name} ${operationNameCount[name]}`;
+    }
+  }
   
-  function processItem(item: any) {
+  function processItem(item: any, parentName: string | null = null) {
     if (item.request) {
       const method = item.request.method || 'GET';
       const url = item.request.url;
       const path = extractPathFromUrl(url, variables);
       const itemName = item.name || 'unknown';
-      
+      const immediateParentName = parentName || null;
       // Generate operation ID
-      const operationId = itemName.toLowerCase().replace(/[^a-z0-9]/g, '-');
-      
+      let operationId = itemName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+      operationId = getUniqueOperationName(operationId);
       const { contentType, bodyType } = getContentTypeAndBodyType(item.request);
       const headers = getHeadersForOperation(item.request, variables);
       const inputs = extractParameters(item.request, variables);
       const bodyInputs = extractRequestBody(item.request, itemName, method, path);
       const returns = extractResponses(item, itemName, method, path);
-      
-      // Combine all inputs (avoid duplicates)
       const allInputs = [...inputs];
       if (bodyInputs.length > 0) {
         allInputs.push(...bodyInputs);
       }
-      
       operations.push({
         name: operationId,
         SUMMARY: itemName || '',
-        DESCRIPTION: item.description ? item.description.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim() : '',
         DESC: generateDesc(item, method, path),
+        TAGS: immediateParentName ? [immediateParentName] : (itemName ? [itemName] : []),
         ENDPOINT: `"/${path}"`,
         VISIBILITY: 'PUBLIC',
         HTTP: {
@@ -414,21 +443,50 @@ function extractOperations(collection: any, variables: Record<string, string>): 
         RETURNS: returns,
       });
     }
-    
-    // Recursively process nested items
     if (item.item) {
       for (const subItem of item.item) {
-        processItem(subItem);
+        processItem(subItem, item.name || parentName || null);
       }
     }
   }
-  
-  // Process all items in the collection
   for (const item of collection.item) {
-    processItem(item);
+    processItem(item, null);
   }
-  
   return operations;
+}
+
+function cleanYaml(yamlString: string): string {
+  // Remove tabs, non-breaking spaces, and non-printable chars except standard whitespace and newlines
+  return yamlString
+    .replace(/\t/g, '  ')
+    .replace(/[\u00A0]/g, ' ')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\r\n/g, '\n');
+}
+
+function checkYamlForHiddenChars(yamlString: string): void {
+  const lines = yamlString.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/\t/.test(line)) {
+      throw new Error(`YAML contains a TAB character at line ${i + 1}:\n${line}`);
+    }
+    if (/\u00A0/.test(line)) {
+      throw new Error(`YAML contains a non-breaking space (U+00A0) at line ${i + 1}:\n${line}`);
+    }
+    if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(line)) {
+      throw new Error(`YAML contains a non-printable character at line ${i + 1}:\n${line}`);
+    }
+  }
+}
+
+function validateYaml(yamlString: string): void {
+  try {
+    yamlLoad(yamlString);
+  } catch (e) {
+    throw new Error('Generated YAML is invalid: ' + (e as any).message);
+  }
 }
 
 function generateWrekenfile(collection: any, variables: Record<string, string>): string {
@@ -442,18 +500,14 @@ function generateWrekenfile(collection: any, variables: Record<string, string>):
   const operations = extractOperations(collection, variables);
   
   let wrekenfile = `VERSION: '1.2'\n`;
-  
-  // Add INIT section with defaults from environment variables
   wrekenfile += `INIT:\n`;
   wrekenfile += `  DEFAULTS:\n`;
   if (Object.keys(variables).length === 0) {
     wrekenfile += `    - w_base_url: https://api.default.com\n`;
   } else {
     for (const [key, value] of Object.entries(variables)) {
-      // Skip sensitive values like API keys and signatures
       const sensitiveKeys = ['api_key', 'api-key', 'x-api-key', 'signature', 'x-signature', 'authorization', 'token', 'password', 'secret'];
       const isSensitive = sensitiveKeys.some(sensitiveKey => key.toLowerCase().includes(sensitiveKey));
-      
       if (isSensitive) {
         wrekenfile += `    - ${key}: "{{${key}}}"\n`;
       } else {
@@ -462,13 +516,26 @@ function generateWrekenfile(collection: any, variables: Record<string, string>):
     }
   }
   
-  // Add INTERFACES section
   wrekenfile += `INTERFACES:\n`;
   for (const operation of operations) {
     wrekenfile += `  ${operation.name}:\n`;
-    wrekenfile += `    SUMMARY: ${operation.SUMMARY}\n`;
-    wrekenfile += `    DESCRIPTION: ${operation.DESCRIPTION}\n`;
-    wrekenfile += `    DESC: ${operation.DESC}\n`;
+    // Quote SUMMARY and DESC if they contain special characters
+    const summary = operation.SUMMARY.includes(':') || operation.SUMMARY.includes('"') ? `"${operation.SUMMARY.replace(/"/g, '\\"')}"` : operation.SUMMARY;
+    const desc = operation.DESC.includes(':') || operation.DESC.includes('"') ? `"${operation.DESC.replace(/"/g, '\\"')}"` : operation.DESC;
+    wrekenfile += `    SUMMARY: ${summary}\n`;
+    wrekenfile += `    DESC: ${desc}\n`;
+    // TAGS
+    if (!operation.TAGS || operation.TAGS.length === 0) {
+      wrekenfile += `    TAGS: []\n`;
+    } else {
+      wrekenfile += `    TAGS:\n`;
+      for (const tag of operation.TAGS) {
+        const tagVal = (typeof tag === 'string' && (tag.includes(':') || tag.includes('"')))
+          ? `"${String(tag).replace(/"/g, '\\"')}"`
+          : String(tag);
+        wrekenfile += `      - ${tagVal}\n`;
+      }
+    }
     wrekenfile += `    ENDPOINT: ${operation.ENDPOINT}\n`;
     wrekenfile += `    VISIBILITY: ${operation.VISIBILITY}\n`;
     wrekenfile += `    HTTP:\n`;
@@ -481,10 +548,11 @@ function generateWrekenfile(collection: any, variables: Record<string, string>):
     }
     wrekenfile += `      BODYTYPE: ${operation.HTTP.BODYTYPE}\n`;
     
-    wrekenfile += `    INPUTS:\n`;
+    // INPUTS
     if (operation.INPUTS.length === 0) {
-      wrekenfile += `      []\n`;
+      wrekenfile += `    INPUTS: []\n`;
     } else {
+      wrekenfile += `    INPUTS:\n`;
       for (const input of operation.INPUTS) {
         wrekenfile += `      - name: ${input.name}\n`;
         wrekenfile += `        type: ${input.type}\n`;
@@ -495,6 +563,7 @@ function generateWrekenfile(collection: any, variables: Record<string, string>):
       }
     }
     
+    // RETURNS
     wrekenfile += `    RETURNS:\n`;
     for (const ret of operation.RETURNS) {
       wrekenfile += `      - RETURNTYPE: ${ret.RETURNTYPE}\n`;
@@ -503,21 +572,35 @@ function generateWrekenfile(collection: any, variables: Record<string, string>):
     }
   }
   
-  // Add STRUCTS section
   wrekenfile += `STRUCTS:\n`;
   for (const [structName, fields] of Object.entries(structs)) {
-    wrekenfile += `  ${structName}:\n`;
     if (fields.length === 0) {
-      wrekenfile += `    []\n`;
+      wrekenfile += `  ${structName}: []\n`;
     } else {
+      wrekenfile += `  ${structName}:\n`;
       for (const field of fields) {
-        wrekenfile += `    - name: ${field.name}\n`;
-        wrekenfile += `      type: ${field.type}\n`;
-        wrekenfile += `      required: '${field.required}'\n`;
+        wrekenfile += '    - name: ' + field.name + '\n';
+        // Quote type if it contains non-alphanumeric characters (except underscore)
+        let typeValue = field.type;
+        if (/[^a-zA-Z0-9_]/.test(typeValue)) {
+          typeValue = '"' + typeValue.replace(/"/g, '\"') + '"';
+        }
+        wrekenfile += '      type: ' + typeValue + '\n';
+        wrekenfile += "      required: '" + field.required + "'\n";
       }
     }
   }
   
+  // Debug print: show first 20 lines of STRUCTS block
+  const structsBlock = wrekenfile.split('STRUCTS:')[1]?.split('\n').slice(0, 20).join('\n');
+  if (structsBlock) {
+    console.log('--- STRUCTS block preview ---');
+    console.log(structsBlock);
+  }
+
+  wrekenfile = cleanYaml(wrekenfile);
+  checkYamlForHiddenChars(wrekenfile);
+  validateYaml(wrekenfile);
   return wrekenfile;
 }
 
