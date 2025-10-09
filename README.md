@@ -96,6 +96,60 @@ const miniFiles: MiniWrekenfile[] = generateMiniWrekenfiles('./Wrekenfile.yaml')
 // Each miniFile contains { content, metadata }
 ```
 
+## CLI Tools
+
+### Convert OpenAPI to Wrekenfile
+
+Generate a Wrekenfile YAML from an OpenAPI (YAML or JSON) spec:
+
+```bash
+npx ts-node src/cli/cli-openapi-to-wrekenfile.ts --input <openapi.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]
+```
+
+**Options:**
+- `--input` or `-i`: Path to your OpenAPI YAML or JSON file (required)
+- `--output` or `-o`: Path to output Wrekenfile YAML (optional, defaults to `output_wrekenfile.yaml`)
+- `--cwd`: Working directory for resolving $refs (optional, defaults to the input file's directory)
+
+**Example:**
+```bash
+npx ts-node src/cli/cli-openapi-to-wrekenfile.ts --input examples/p3id_swagger.json --output wrekenfile.yaml --cwd .
+```
+
+### Convert Postman Collection to Wrekenfile
+
+Convert a Postman collection JSON to a Wrekenfile YAML file:
+
+```bash
+npx ts-node src/cli/cli-postman-to-wrekenfile.ts <postman_collection.json> <output_wrekenfile.yaml> [postman_environment.json]
+```
+
+**Example:**
+```bash
+npx ts-node src/cli/cli-postman-to-wrekenfile.ts examples/transact_bridge_postman.json wrekenfile.yaml
+```
+
+**Note:** The third argument (environment file) is optional.
+
+### Generate Mini Wrekenfiles
+
+Generate mini Wrekenfiles for each endpoint from a main Wrekenfile YAML:
+
+```bash
+npx ts-node src/cli/cli-mini-wrekenfile-generator.ts --input <wrekenfile.yaml> [--output <dir>]
+```
+
+**Options:**
+- `--input` or `-i`: Path to your main Wrekenfile YAML (required)
+- `--output` or `-o`: Output directory for mini Wrekenfiles (optional, defaults to `./mini-wrekenfiles`)
+
+**Example:**
+```bash
+npx ts-node src/cli/cli-mini-wrekenfile-generator.ts --input wrekenfile.yaml --output ./mini-wrekenfiles
+```
+
+This will generate one mini Wrekenfile per endpoint in the specified output directory.
+
 ## API Reference
 
 ### Core Functions
@@ -167,6 +221,10 @@ src/
 ├── postman-to-wrekenfile.ts    # Postman converter
 ├── wrekenfile-validator.ts     # Validation logic
 ├── mini-wrekenfile-generator.ts # Mini chunk generator
+├── cli/                        # CLI tools
+│   ├── cli-openapi-to-wrekenfile.ts
+│   ├── cli-postman-to-wrekenfile.ts
+│   └── cli-mini-wrekenfile-generator.ts
 └── example-usage.ts            # Usage examples
 
 dist/                           # Compiled JavaScript + types
