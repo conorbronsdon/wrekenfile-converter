@@ -1,8 +1,8 @@
 // Main entry point for the wrekenfile-converter library (no CLI)
 
 // Export main conversion functions
-export { generateWrekenfile } from './openapi-to-wreken';
-export { generateWrekenfile as generateWrekenfileV2 } from './openapi-v2-to-wrekenfile';
+export { generateWrekenfile } from './rest/openapi-to-wreken';
+export { generateWrekenfile as generateWrekenfileV2 } from './rest/openapi-v2-to-wrekenfile';
 export { 
   generateWrekenfile as generateWrekenfileFromPostman,
   extractStructs,
@@ -13,7 +13,7 @@ export {
   loadEnvironmentFile,
   extractCollectionVariables,
   resolveVariables
-} from './postman-to-wrekenfile';
+} from './rest/postman-to-wrekenfile';
 
 // Export validation function
 export { 
