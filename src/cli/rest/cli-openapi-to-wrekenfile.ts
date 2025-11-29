@@ -2,7 +2,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { load } from 'js-yaml';
-import { generateWrekenfile } from '../openapi-to-wreken';
+import { generateWrekenfile } from '../../rest/openapi-to-wreken';
 
 function printUsage() {
   console.log(`Usage: npx ts-node src/cli/cli-openapi-to-wrekenfile.ts --input <openapi.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]`);

@@ -103,7 +103,7 @@ const miniFiles: MiniWrekenfile[] = generateMiniWrekenfiles('./Wrekenfile.yaml')
 Generate a Wrekenfile YAML from an OpenAPI (YAML or JSON) spec:
 
 ```bash
-npx ts-node src/cli/cli-openapi-to-wrekenfile.ts --input <openapi.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]
+npx ts-node src/cli/rest/cli-openapi-to-wrekenfile.ts --input <openapi.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]
 ```
 
 **Options:**
@@ -113,7 +113,7 @@ npx ts-node src/cli/cli-openapi-to-wrekenfile.ts --input <openapi.yaml|json> [--
 
 **Example:**
 ```bash
-npx ts-node src/cli/cli-openapi-to-wrekenfile.ts --input examples/p3id_swagger.json --output wrekenfile.yaml --cwd .
+npx ts-node src/cli/rest/cli-openapi-to-wrekenfile.ts --input examples/p3id_swagger.json --output wrekenfile.yaml --cwd .
 ```
 
 ### Convert Postman Collection to Wrekenfile
@@ -121,12 +121,12 @@ npx ts-node src/cli/cli-openapi-to-wrekenfile.ts --input examples/p3id_swagger.j
 Convert a Postman collection JSON to a Wrekenfile YAML file:
 
 ```bash
-npx ts-node src/cli/cli-postman-to-wrekenfile.ts <postman_collection.json> <output_wrekenfile.yaml> [postman_environment.json]
+npx ts-node src/cli/rest/cli-postman-to-wrekenfile.ts <postman_collection.json> <output_wrekenfile.yaml> [postman_environment.json]
 ```
 
 **Example:**
 ```bash
-npx ts-node src/cli/cli-postman-to-wrekenfile.ts examples/transact_bridge_postman.json wrekenfile.yaml
+npx ts-node src/cli/rest/cli-postman-to-wrekenfile.ts examples/transact_bridge_postman.json wrekenfile.yaml
 ```
 
 **Note:** The third argument (environment file) is optional.
@@ -215,24 +215,26 @@ npm run example
 
 ```
 src/
-├── index.ts                    # Main exports
-├── openapi-to-wreken.ts        # OpenAPI v3 converter
-├── openapi-v2-to-wrekenfile.ts # OpenAPI v2 converter
-├── postman-to-wrekenfile.ts    # Postman converter
-├── wrekenfile-validator.ts     # Validation logic
-├── mini-wrekenfile-generator.ts # Mini chunk generator
-├── cli/                        # CLI tools
-│   ├── cli-openapi-to-wrekenfile.ts
-│   ├── cli-postman-to-wrekenfile.ts
+├── index.ts                        # Main exports
+├── rest/
+│   ├── openapi-to-wreken.ts        # OpenAPI v3 converter
+│   ├── openapi-v2-to-wrekenfile.ts # OpenAPI v2 converter
+│   └── postman-to-wrekenfile.ts    # Postman converter
+├── wrekenfile-validator.ts         # Validation logic
+├── mini-wrekenfile-generator.ts    # Mini chunk generator
+├── cli/                            # CLI tools
+│   ├── rest/
+│   │   ├── cli-openapi-to-wrekenfile.ts
+│   │   └── cli-postman-to-wrekenfile.ts
 │   └── cli-mini-wrekenfile-generator.ts
-└── example-usage.ts            # Usage examples
+└── example-usage.ts                # Usage examples
 
-dist/                           # Compiled JavaScript + types
+dist/                               # Compiled JavaScript + types
 ├── index.js
 ├── index.d.ts
 └── ... (all compiled files)
 
-mini-wrekenfiles/               # Generated mini chunks (if you save them)
+mini-wrekenfiles/                   # Generated mini chunks (if you save them)
 ├── mini-v2-app-projects.yaml
 ├── mini-v2-app-authenticate.yaml
 └── ...
