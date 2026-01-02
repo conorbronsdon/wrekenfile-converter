@@ -1,6 +1,7 @@
 # Wrekenfile Converter (Library)
+## Version 2.1.0
 
-A comprehensive TypeScript/JavaScript library for converting OpenAPI specifications (v2 and v3) and Postman collections into [Wrekenfile](./wrekenfile.md) YAML format, with advanced mini-chunking capabilities for vector database storage and AI context management.
+A comprehensive TypeScript/JavaScript library for converting OpenAPI specifications (v2 and v3) and Postman collections into [Wrekenfile](.src/v2/wrekenfile_v_2_0_1.md) YAML format, with advanced mini-chunking capabilities for vector database storage and AI context management.
 
 ## Features
 
@@ -28,8 +29,15 @@ yarn add wrekenfile-converter
 
 ## Usage
 
+### Version Support
+
+This library supports two Wrekenfile spec versions:
+- **v1** (Wrekenfile spec 1.2) - Default/legacy
+- **v2** (Wrekenfile spec 2.1.0) - Latest
+
 ### Importing the Library
 
+**Default import (currently v1, backward compatible):**
 ```typescript
 import {
   generateWrekenfile, // OpenAPI v3
@@ -40,6 +48,15 @@ import {
   MiniWrekenfile,
   ValidationResult
 } from 'wrekenfile-converter';
+```
+
+**Explicit version imports:**
+```typescript
+// Import v1 (Wrekenfile spec 1.2)
+import { generateWrekenfile } from 'wrekenfile-converter/v1';
+
+// Import v2 (Wrekenfile spec 2.1.0)
+import { generateWrekenfile } from 'wrekenfile-converter/v2';
 ```
 
 ### Convert OpenAPI v3 to Wrekenfile
@@ -83,7 +100,7 @@ const wrekenfileYaml = generateWrekenfileFromPostman(collection, variables);
 import { validateWrekenfile } from 'wrekenfile-converter';
 
 const result = validateWrekenfile('./Wrekenfile.yaml');
-console.log(result.isValid ? '✅ Valid' : '❌ Invalid');
+console.log(result.isValid ? 'Valid' : 'Invalid');
 console.log(result.errors, result.warnings);
 ```
 
@@ -215,29 +232,29 @@ npm run example
 
 ```
 src/
-├── index.ts                        # Main exports
-├── rest/
-│   ├── openapi-to-wreken.ts        # OpenAPI v3 converter
-│   ├── openapi-v2-to-wrekenfile.ts # OpenAPI v2 converter
-│   └── postman-to-wrekenfile.ts    # Postman converter
-├── wrekenfile-validator.ts         # Validation logic
-├── mini-wrekenfile-generator.ts    # Mini chunk generator
-├── cli/                            # CLI tools
-│   ├── rest/
-│   │   ├── cli-openapi-to-wrekenfile.ts
-│   │   └── cli-postman-to-wrekenfile.ts
-│   └── cli-mini-wrekenfile-generator.ts
-└── example-usage.ts                # Usage examples
+├── index.ts                        # Main exports (defaults to v1)
+├── example-usage.ts                # Usage examples
+├── versions.ts                     # Version constants
+├── v1/                             # Wrekenfile spec v1.2
+│   ├── index.ts
+│   ├── openapi-to-wreken.ts
+│   ├── openapi-v2-to-wrekenfile.ts
+│   ├── postman-to-wrekenfile.ts
+│   ├── mini-wrekenfile-generator.ts
+│   ├── wrekenfile-validator.ts
+│   └── cli/                        # CLI tools for v1
+└── v2/                             # Wrekenfile spec v2.1.0
+    ├── index.ts
+    ├── openapi-to-wreken.ts
+    ├── openapi-v2-to-wrekenfile.ts
+    ├── postman-to-wrekenfile.ts
+    ├── mini-wrekenfile-generator.ts
+    └── cli/                        # CLI tools for v2
 
 dist/                               # Compiled JavaScript + types
 ├── index.js
-├── index.d.ts
-└── ... (all compiled files)
-
-mini-wrekenfiles/                   # Generated mini chunks (if you save them)
-├── mini-v2-app-projects.yaml
-├── mini-v2-app-authenticate.yaml
-└── ...
+├── v1/
+└── v2/
 ```
 
 ## License

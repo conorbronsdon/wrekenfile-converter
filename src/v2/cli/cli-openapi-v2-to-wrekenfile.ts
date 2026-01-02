@@ -2,10 +2,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { load } from 'js-yaml';
-import { generateWrekenfile } from '../../rest/openapi-to-wreken';
+import { generateWrekenfile } from '../openapi-v2-to-wrekenfile';
 
 function printUsage() {
-  console.log(`Usage: npx ts-node src/cli/cli-openapi-to-wrekenfile.ts --input <openapi.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]`);
+  console.log(`Usage: npx ts-node src/cli/rest/cli-openapi-v2-to-wrekenfile.ts --input <swagger.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]`);
 }
 
 function parseArgs() {
@@ -38,22 +38,22 @@ async function main() {
     process.exit(1);
   }
 
-  let openapiSpec: any;
+  let swaggerSpec: any;
   try {
     const raw = fs.readFileSync(inputPath, 'utf8');
     if (inputPath.endsWith('.json')) {
-      openapiSpec = JSON.parse(raw);
+      swaggerSpec = JSON.parse(raw);
     } else {
-      openapiSpec = load(raw);
+      swaggerSpec = load(raw);
     }
   } catch (err) {
-    console.error('Failed to load OpenAPI file:', err);
+    console.error('Failed to load Swagger/OpenAPI v2 file:', err);
     process.exit(1);
   }
 
   let wrekenfileYaml: string;
   try {
-    wrekenfileYaml = generateWrekenfile(openapiSpec, baseDir);
+    wrekenfileYaml = generateWrekenfile(swaggerSpec, baseDir);
   } catch (err) {
     console.error('Failed to generate Wrekenfile:', err);
     process.exit(1);
@@ -61,11 +61,12 @@ async function main() {
 
   try {
     fs.writeFileSync(outputPath, wrekenfileYaml, 'utf8');
-    console.log(`Wrekenfile written to ${outputPath}`);
+    console.log(`✅ Wrekenfile v2.0.1 written to ${outputPath}`);
   } catch (err) {
     console.error('Failed to write output file:', err);
     process.exit(1);
   }
 }
 
-main(); 
+main();
+
