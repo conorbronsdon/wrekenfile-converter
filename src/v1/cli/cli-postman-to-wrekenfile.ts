@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'fs';
 import path from 'path';
-import { generateWrekenfile, loadEnvironmentFile } from '../../rest/postman-to-wrekenfile';
+import { generateWrekenfile, loadEnvironmentFile } from '../postman-to-wrekenfile';
 
 function printUsage() {
   console.log('Usage: npx ts-node src/cli-postman-to-wrekenfile.ts <postman_collection.json> <output_wrekenfile.yaml> [postman_environment.json]');
