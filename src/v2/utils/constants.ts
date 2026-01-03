@@ -78,3 +78,41 @@ export const BODYTYPE_RAW = 'raw';
  */
 export const DEFAULT_HTTP_SCHEME = 'https';
 
+/**
+ * YAML document separators to remove
+ */
+export const YAML_DOCUMENT_SEPARATOR_START = '---';
+export const YAML_DOCUMENT_SEPARATOR_END = '...';
+export const YAML_SEPARATOR_LINES = ['===', '___'];
+
+/**
+ * Method group type prefixes
+ */
+export const GROUP_PREFIX_HTTP = 'http:';
+export const GROUP_PREFIX_SDK = 'sdk:';
+export const GROUP_PREFIX_OTHER = 'other:';
+
+/**
+ * Mini-wrekenfile filename prefix
+ */
+export const MINI_FILENAME_PREFIX = 'mini-';
+
+/**
+ * YAML file extension
+ */
+export const YAML_EXTENSION = '.yaml';
+
+/**
+ * Default mini-wrekenfiles output directory
+ */
+export const DEFAULT_MINI_OUTPUT_DIR = './mini-wrekenfiles';
+
+/**
+ * Filename sanitization regex patterns
+ */
+export const FILENAME_INVALID_CHARS = /[^a-zA-Z0-9-_]/g;
+export const FILENAME_MULTIPLE_HYPHENS = /-+/g;
+export const FILENAME_LEADING_TRAILING_HYPHENS = /^-|-$/g;
+export const FILENAME_LEADING_SLASHES = /^\/+/;
+export const FILENAME_TRAILING_SLASHES = /\/+$/;
+
