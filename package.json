@@ -29,6 +29,9 @@
   "files": [
     "dist/**/*",
     "README.md",
+    "USAGE.md",
+    "LOCAL_TESTING.md",
+    "QUICK_START.md",
     "wrekenfile.md"
   ],
   "exports": {
