@@ -5,14 +5,66 @@ import { load as yamlLoad } from 'js-yaml';
 
 /**
  * Clean YAML string by removing tabs, non-breaking spaces, and other problematic characters
+ * Also removes YAML document separators, excessive blank lines, and leading/trailing whitespace
  */
 export function cleanYaml(yamlString: string): string {
-  return yamlString
+  let cleaned = yamlString
+    // Replace tabs with spaces
     .replace(/\t/g, '  ')
+    // Replace non-breaking spaces
     .replace(/[\u00A0]/g, ' ')
+    // Remove non-printable control characters
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    .replace(/[ \t]+$/gm, '')
-    .replace(/\r\n/g, '\n');
+    // Normalize line endings
+    .replace(/\r\n/g, '\n')
+    // Remove trailing whitespace from each line
+    .replace(/[ \t]+$/gm, '');
+
+  // Remove YAML document separators (--- and ...) except at the very start
+  // Remove --- if it appears after the first line
+  const lines = cleaned.split('\n');
+  const filteredLines: string[] = [];
+  let isFirstLine = true;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    // Skip YAML document separators (except --- at the very start)
+    if (trimmed === '---' && !isFirstLine) {
+      continue;
+    }
+    if (trimmed === '...') {
+      continue;
+    }
+    
+    // Skip separator lines
+    if (trimmed === '===' || trimmed === '___') {
+      continue;
+    }
+    
+    // Keep the line
+    filteredLines.push(line);
+    if (trimmed !== '') {
+      isFirstLine = false;
+    }
+  }
+  
+  cleaned = filteredLines.join('\n');
+  
+  // Remove excessive blank lines (3+ consecutive newlines → 2)
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  
+  // Remove leading whitespace (whitespace-only lines at the start)
+  cleaned = cleaned.replace(/^\s+/, '');
+  
+  // Remove trailing whitespace (including newlines) and ensure single trailing newline
+  cleaned = cleaned.replace(/[\s\n]+$/, '');
+  if (cleaned) {
+    cleaned += '\n';
+  }
+  
+  return cleaned;
 }
 
 /**
