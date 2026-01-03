@@ -98,20 +98,29 @@ export function validateYaml(yamlString: string): void {
 }
 
 /**
- * Post-process YAML to remove quotes from type strings
- * - Removes quotes from STRUCT(...) values
- * - Converts quoted array types to YAML block scalar format
+ * Post-process YAML to ensure proper quoting of complex types
+ * - Keeps STRUCT(...) unquoted (valid YAML)
+ * - Quotes []STRUCT(...) and []TYPE patterns (required for valid YAML)
+ * - Converts block scalar format back to quoted format if present
  */
 export function removeTypeQuotes(yamlString: string): string {
-  // Remove quotes from STRUCT(...) values
+  // First, convert any block scalar format back to regular format
+  // Handle: TYPE: |-\n    []STRUCT(...)
+  yamlString = yamlString.replace(/^(\s+)(-?\s*)(TYPE|RETURNTYPE):\s*\|\-\s*\n(\s+)(\[\]STRUCT\([^)]+\)|\[\][A-Z]+)/gm, (match, indent, arrayPrefix, key, valueIndent, value) => {
+    return `${indent}${arrayPrefix}${key}: ${value}`;
+  });
+  
+  // Remove quotes from STRUCT(...) values (they don't need quotes)
   yamlString = yamlString.replace(/(TYPE|RETURNTYPE):\s*"STRUCT\(([^)]+)\)"/g, '$1: STRUCT($2)');
   
-  // Remove quotes from array types - use YAML block scalar syntax (|-) to avoid quotes
-  // YAML requires quotes for values starting with [], so we use block scalar format
+  // Quote array types ([]STRUCT(...) and []TYPE) - required for valid YAML
   // Handle both regular lines and array items (lines starting with -)
-  yamlString = yamlString.replace(/^(\s+)(-?\s*)(TYPE|RETURNTYPE):\s*['"](\[\]STRUCT\([^)]+\)|\[\][A-Z]+)['"]/gm, (match, indent, arrayPrefix, key, value) => {
-    // Use block scalar format: key: |-\n  value (requires newline after |-)
-    return `${indent}${arrayPrefix}${key}: |-\n${indent}${arrayPrefix.replace(/-/, ' ')}  ${value}`;
+  yamlString = yamlString.replace(/^(\s+)(-?\s*)(TYPE|RETURNTYPE):\s*(\[\]STRUCT\([^)]+\)|\[\][A-Z]+)(\s*)$/gm, (match, indent, arrayPrefix, key, value, trailing) => {
+    // Quote the value if it's not already quoted
+    if (!value.startsWith('"') && !value.startsWith("'")) {
+      return `${indent}${arrayPrefix}${key}: "${value}"${trailing}`;
+    }
+    return match;
   });
   
   return yamlString;
