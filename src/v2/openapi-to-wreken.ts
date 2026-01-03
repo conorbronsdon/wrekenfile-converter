@@ -666,7 +666,6 @@ function extractMethods(spec: any, baseDir: string): Record<string, any> {
   
   // Check if paths exists and is an object
   if (!spec.paths || typeof spec.paths !== 'object') {
-    console.warn('Warning: No paths found in OpenAPI specification');
     return methods;
   }
   

@@ -1,10 +1,25 @@
 import * as yaml from 'js-yaml';
 import * as fs from 'fs';
+import {
+  GROUP_PREFIX_HTTP,
+  GROUP_PREFIX_SDK,
+  GROUP_PREFIX_OTHER,
+  MINI_FILENAME_PREFIX,
+  YAML_EXTENSION,
+  DEFAULT_MINI_OUTPUT_DIR,
+  FILENAME_INVALID_CHARS,
+  FILENAME_MULTIPLE_HYPHENS,
+  FILENAME_LEADING_TRAILING_HYPHENS,
+  FILENAME_LEADING_SLASHES,
+  FILENAME_TRAILING_SLASHES,
+} from './utils/constants';
 
 export interface MiniWrekenfile {
   content: string;
   metadata: {
-    endpoint: string;
+    endpoint?: string;
+    interface?: string;
+    source?: string;
     methods: string[];
     structs: string[];
     filename: string;
@@ -14,195 +29,190 @@ export interface MiniWrekenfile {
 interface WrekenfileData {
   VERSION: string;
   DEFAULTS?: Record<string, any>;
+  SOURCES?: Record<string, any>;
   METHODS: Record<string, any>;
   STRUCTS?: Record<string, any>;
 }
 
-/**
- * Generates mini Wrekenfiles by grouping methods by endpoint
- * Each mini Wrekenfile contains all methods for a single endpoint plus their required structs
- */
 export function generateMiniWrekenfiles(wrekenfileContent: string): MiniWrekenfile[] {
   if (!wrekenfileContent || typeof wrekenfileContent !== 'string') {
     throw new Error("Argument 'wrekenfileContent' is required and must be a string");
   }
-  try {
-    // Parse the main Wrekenfile from YAML string
-    const data = yaml.load(wrekenfileContent) as WrekenfileData;
-    
-    if (!data.METHODS) {
-      throw new Error('No METHODS section found in Wrekenfile');
-    }
-
-    // Group methods by endpoint
-    const endpointGroups = groupMethodsByEndpoint(data.METHODS);
-    
-    const miniWrekenfiles: MiniWrekenfile[] = [];
-    
-    // Generate a mini Wrekenfile for each endpoint group
-    for (const [endpoint, methods] of Object.entries(endpointGroups)) {
-      const miniWrekenfile = createMiniWrekenfile(data, endpoint, methods);
-      miniWrekenfiles.push(miniWrekenfile);
-    }
-    
-    return miniWrekenfiles;
-  } catch (error) {
-    console.error('Error generating mini Wrekenfiles:', error);
-    throw error;
+  
+  const data = yaml.load(wrekenfileContent) as WrekenfileData;
+  
+  if (!data.METHODS) {
+    throw new Error('No METHODS section found in Wrekenfile');
   }
+
+  const methodGroups = groupMethods(data.METHODS);
+  const miniWrekenfiles: MiniWrekenfile[] = [];
+  
+  for (const [groupKey, groupInfo] of Object.entries(methodGroups)) {
+    miniWrekenfiles.push(createMiniWrekenfile(data, groupKey, groupInfo));
+  }
+  
+  return miniWrekenfiles;
 }
 
-/**
- * Groups methods by their endpoint path
- */
-function groupMethodsByEndpoint(methods: Record<string, any>): Record<string, Record<string, any>> {
-  const groups: Record<string, Record<string, any>> = {};
+interface MethodGroupInfo {
+  methods: Record<string, any>;
+  type: 'http' | 'sdk' | 'other';
+  endpoint?: string;
+  interface?: string;
+  source?: string;
+}
+
+const BACKTICK = '`';
+const SLASH = '/';
+
+function normalizeEndpoint(endpoint: string): string {
+  endpoint = endpoint.trim();
+  if (endpoint.startsWith(BACKTICK) && endpoint.endsWith(BACKTICK)) {
+    endpoint = endpoint.slice(1, -1).trim();
+  }
+  if (endpoint.startsWith(SLASH)) {
+    endpoint = endpoint.substring(1);
+  }
+  return endpoint;
+}
+
+function groupMethods(methods: Record<string, any>): Record<string, MethodGroupInfo> {
+  const groups: Record<string, MethodGroupInfo> = {};
   
   for (const [methodName, methodData] of Object.entries(methods)) {
-    let endpoint = methodData.HTTP?.ENDPOINT;
-    if (!endpoint) {
-      console.warn(`Method ${methodName} has no HTTP.ENDPOINT, skipping`);
-      continue;
-    }
-    // Normalize endpoint: remove backticks and trim whitespace
-    if (typeof endpoint === 'string') {
-      endpoint = endpoint.trim();
-      if (endpoint.startsWith('`') && endpoint.endsWith('`')) {
-        endpoint = endpoint.slice(1, -1).trim();
+    if (methodData.HTTP?.ENDPOINT) {
+      const endpoint = normalizeEndpoint(methodData.HTTP.ENDPOINT);
+      const groupKey = `${GROUP_PREFIX_HTTP}${endpoint}`;
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          methods: {},
+          type: 'http',
+          endpoint: endpoint
+        };
       }
-      // Remove leading slash if present for consistency
-      if (endpoint.startsWith('/')) {
-        endpoint = endpoint.substring(1);
+      groups[groupKey].methods[methodName] = methodData;
+    } else if (methodData.INTERFACE?.NAME) {
+      const interfaceName = methodData.INTERFACE.NAME;
+      const source = methodData.SOURCE;
+      const groupKey = source ? `${GROUP_PREFIX_SDK}${source}:${interfaceName}` : `${GROUP_PREFIX_SDK}${interfaceName}`;
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          methods: {},
+          type: 'sdk',
+          interface: interfaceName,
+          source: source
+        };
       }
+      groups[groupKey].methods[methodName] = methodData;
+    } else {
+      const groupKey = `${GROUP_PREFIX_OTHER}${methodName}`;
+      groups[groupKey] = {
+        methods: { [methodName]: methodData },
+        type: 'other'
+      };
     }
-    if (!groups[endpoint]) {
-      groups[endpoint] = {};
-    }
-    groups[endpoint][methodName] = methodData;
   }
   
   return groups;
 }
 
-/**
- * Creates a complete mini Wrekenfile for a specific endpoint
- */
 function createMiniWrekenfile(
   data: WrekenfileData, 
-  endpoint: string, 
-  methods: Record<string, any>
+  groupKey: string, 
+  groupInfo: MethodGroupInfo
 ): MiniWrekenfile {
-  // Collect all structs referenced by the methods in this group
+  const { methods, type, endpoint, interface: interfaceName, source } = groupInfo;
   const requiredStructs = collectRequiredStructs(methods, data.STRUCTS || {});
   
-  // Create the mini Wrekenfile structure (v2.0.1 format)
   const miniData: any = {
     VERSION: data.VERSION,
     METHODS: methods,
   };
   
-  // Add DEFAULTS if present
+  if (type === 'sdk' && source && data.SOURCES?.[source]) {
+    miniData.SOURCES = { [source]: data.SOURCES[source] };
+  }
+  
   if (data.DEFAULTS && Object.keys(data.DEFAULTS).length > 0) {
     miniData.DEFAULTS = data.DEFAULTS;
   }
   
-  // Add STRUCTS if there are any required
   if (Object.keys(requiredStructs).length > 0) {
     miniData.STRUCTS = requiredStructs;
   }
   
-  // Convert to YAML
   const content = yaml.dump(miniData, { 
     indent: 2, 
     lineWidth: -1,
     noRefs: true 
   });
   
-  // Generate metadata
-  const methodList = Object.values(methods).map((method: any) => method.HTTP?.METHOD).filter(Boolean);
-  const structNames = Object.keys(requiredStructs);
-  const filename = generateFilename(endpoint);
+  const methodList = Object.values(methods).map((method: any) => {
+    return method.HTTP?.METHOD || method.INTERFACE?.NAME || Object.keys(methods)[0];
+  }).filter(Boolean);
   
-  return {
-    content,
-    metadata: {
-      endpoint: `/${endpoint}`, // Add leading slash for consistency
-      methods: methodList,
-      structs: structNames,
-      filename
-    }
+  const metadata: MiniWrekenfile['metadata'] = {
+    methods: methodList,
+    structs: Object.keys(requiredStructs),
+    filename: generateFilename(groupKey, type, endpoint, interfaceName, source)
   };
+  
+  if (endpoint) metadata.endpoint = `/${endpoint}`;
+  if (interfaceName) metadata.interface = interfaceName;
+  if (source) metadata.source = source;
+  
+  return { content, metadata };
 }
 
-/**
- * Collects all structs required by the given methods
- */
+function extractTypeFromInput(value: any): string | null {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && 'TYPE' in value) return (value as any).TYPE;
+  return null;
+}
+
+function collectStructRefsFromType(type: string, structRefs: Set<string>): void {
+  const structNames = extractAllStructNames(type);
+  for (const structName of structNames) {
+    if (structName) structRefs.add(structName);
+  }
+}
+
 function collectRequiredStructs(
   methods: Record<string, any>, 
   allStructs: Record<string, any>
 ): Record<string, any> {
   const requiredStructs: Record<string, any> = {};
   const processedStructs = new Set<string>();
-  
-  // Extract struct references from methods
   const structRefs = new Set<string>();
   
   for (const methodData of Object.values(methods)) {
-    // Check INPUTS
     if (methodData.INPUTS) {
       for (const input of methodData.INPUTS) {
-        // Handle both simple form (key: type) and extended form (key: { TYPE: ... })
-        for (const [key, value] of Object.entries(input)) {
-          let type: string;
-          if (typeof value === 'string') {
-            type = value; // Simple form
-          } else if (value && typeof value === 'object' && 'TYPE' in value) {
-            type = (value as any).TYPE; // Extended form
-          } else {
-            continue;
-          }
-          const structNames = extractAllStructNames(type);
-          for (const structName of structNames) {
-            if (structName) structRefs.add(structName);
-          }
+        for (const value of Object.values(input)) {
+          const type = extractTypeFromInput(value);
+          if (type) collectStructRefsFromType(type, structRefs);
         }
       }
     }
     
-    // Check RETURNS
     if (methodData.RETURNS) {
       for (const ret of methodData.RETURNS) {
-        if (ret.RETURNTYPE) {
-          const structNames = extractAllStructNames(ret.RETURNTYPE);
-          for (const structName of structNames) {
-            if (structName) structRefs.add(structName);
-          }
-        }
+        if (ret.RETURNTYPE) collectStructRefsFromType(ret.RETURNTYPE, structRefs);
       }
     }
     
-    // Check ERRORS
     if (methodData.ERRORS) {
       for (const error of methodData.ERRORS) {
-        if (error.TYPE) {
-          const structNames = extractAllStructNames(error.TYPE);
-          for (const structName of structNames) {
-            if (structName) structRefs.add(structName);
-          }
-        }
+        if (error.TYPE) collectStructRefsFromType(error.TYPE, structRefs);
       }
     }
     
-    // Check ASYNC.RESULT.TYPE
     if (methodData.ASYNC?.RESULT?.TYPE) {
-      const structNames = extractAllStructNames(methodData.ASYNC.RESULT.TYPE);
-      for (const structName of structNames) {
-        if (structName) structRefs.add(structName);
-      }
+      collectStructRefsFromType(methodData.ASYNC.RESULT.TYPE, structRefs);
     }
   }
   
-  // Recursively collect all required structs and their dependencies
   for (const structName of structRefs) {
     collectStructRecursively(structName, allStructs, requiredStructs, processedStructs);
   }
@@ -210,35 +220,23 @@ function collectRequiredStructs(
   return requiredStructs;
 }
 
-/**
- * Recursively collects a struct and all its nested struct dependencies
- */
 function collectStructRecursively(
   structName: string,
   allStructs: Record<string, any>,
   requiredStructs: Record<string, any>,
   processedStructs: Set<string>
-) {
-  if (processedStructs.has(structName)) {
-    return; // Already processed
-  }
-  
-  processedStructs.add(structName);
-  
-  if (!allStructs[structName]) {
-    console.warn(`Struct ${structName} not found in STRUCTS section`);
+): void {
+  if (processedStructs.has(structName) || !allStructs[structName]) {
     return;
   }
   
-  // Add the struct
+  processedStructs.add(structName);
   requiredStructs[structName] = allStructs[structName];
   
-  // Check for nested struct references
   const structFields = allStructs[structName];
   if (Array.isArray(structFields)) {
     for (const field of structFields) {
       if (field.type) {
-        // Handle STRUCT(SomeStruct) and []STRUCT(SomeStruct)
         const nestedStructNames = extractAllStructNames(field.type);
         for (const nestedStructName of nestedStructNames) {
           if (nestedStructName) {
@@ -250,53 +248,55 @@ function collectStructRecursively(
   }
 }
 
-/**
- * Extracts all struct names from a type string, e.g. STRUCT(SomeStruct), []STRUCT(SomeStruct), map[STRING]STRUCT(SomeStruct)
- */
+const STRUCT_REGEX = /^STRUCT\(([^)]+)\)/;
+const ARRAY_STRUCT_REGEX = /^\[\]STRUCT\(([^)]+)\)/;
+const MAP_STRUCT_REGEX = /map\[[^\]]+\]STRUCT\(([^)]+)\)/;
+
 function extractAllStructNames(typeString: string): string[] {
   const matches: string[] = [];
-  // Match STRUCT(SomeStruct)
-  const match1 = typeString.match(/^STRUCT\(([^)]+)\)/);
+  const match1 = typeString.match(STRUCT_REGEX);
+  const match2 = typeString.match(ARRAY_STRUCT_REGEX);
+  const match3 = typeString.match(MAP_STRUCT_REGEX);
   if (match1) matches.push(match1[1]);
-  // Match []STRUCT(SomeStruct)
-  const match2 = typeString.match(/^\[\]STRUCT\(([^)]+)\)/);
   if (match2) matches.push(match2[1]);
-  // Match map[KEY]STRUCT(SomeStruct)
-  const match3 = typeString.match(/map\[[^\]]+\]STRUCT\(([^)]+)\)/);
   if (match3) matches.push(match3[1]);
   return matches;
 }
 
-/**
- * Extracts struct name from STRUCT(name) format
- */
-function extractStructName(typeString: string): string | null {
-  const match = typeString.match(/^STRUCT\(([^)]+)\)/) || 
-                typeString.match(/^\[\]STRUCT\(([^)]+)\)/) ||
-                typeString.match(/map\[[^\]]+\]STRUCT\(([^)]+)\)/);
-  return match ? match[1] : null;
+function sanitizeFilename(name: string): string {
+  return name
+    .replace(FILENAME_LEADING_SLASHES, '')
+    .replace(FILENAME_TRAILING_SLASHES, '')
+    .replace(FILENAME_INVALID_CHARS, '-')
+    .replace(FILENAME_MULTIPLE_HYPHENS, '-')
+    .replace(FILENAME_LEADING_TRAILING_HYPHENS, '');
 }
 
-/**
- * Generates a filename for the mini Wrekenfile
- */
-function generateFilename(endpoint: string): string {
-  // Clean the endpoint to create a valid filename
-  const cleanEndpoint = endpoint
-    .replace(/^\/+/, '') // Remove leading slashes
-    .replace(/\/+$/, '') // Remove trailing slashes
-    .replace(/[^a-zA-Z0-9-_]/g, '-') // Replace special chars with hyphens
-    .replace(/-+/g, '-') // Replace multiple hyphens with single
-    .replace(/^-|-$/g, ''); // Remove leading/trailing hyphens
+function generateFilename(
+  groupKey: string,
+  type: 'http' | 'sdk' | 'other',
+  endpoint?: string,
+  interfaceName?: string,
+  source?: string
+): string {
+  let cleanName: string;
   
-  return `mini-${cleanEndpoint}.yaml`;
+  if (type === 'http' && endpoint) {
+    cleanName = sanitizeFilename(endpoint);
+  } else if (type === 'sdk' && interfaceName) {
+    cleanName = sanitizeFilename(interfaceName);
+    if (source) {
+      const cleanSource = sanitizeFilename(source);
+      cleanName = `${cleanSource}-${cleanName}`;
+    }
+  } else {
+    cleanName = sanitizeFilename(groupKey.replace(GROUP_PREFIX_OTHER, ''));
+  }
+  
+  return `${MINI_FILENAME_PREFIX}${cleanName}${YAML_EXTENSION}`;
 }
 
-/**
- * Saves mini Wrekenfiles to disk (optional utility function)
- */
-export function saveMiniWrekenfiles(miniWrekenfiles: MiniWrekenfile[], outputDir: string = './mini-wrekenfiles'): void {
-  // Create output directory if it doesn't exist
+export function saveMiniWrekenfiles(miniWrekenfiles: MiniWrekenfile[], outputDir: string = DEFAULT_MINI_OUTPUT_DIR): void {
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
@@ -304,7 +304,6 @@ export function saveMiniWrekenfiles(miniWrekenfiles: MiniWrekenfile[], outputDir
   for (const miniFile of miniWrekenfiles) {
     const filePath = `${outputDir}/${miniFile.metadata.filename}`;
     fs.writeFileSync(filePath, miniFile.content);
-    console.log(`Saved: ${filePath}`);
   }
 }
 
