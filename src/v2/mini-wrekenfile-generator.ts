@@ -12,7 +12,9 @@ import {
   FILENAME_LEADING_TRAILING_HYPHENS,
   FILENAME_LEADING_SLASHES,
   FILENAME_TRAILING_SLASHES,
+  YAML_DUMP_OPTIONS,
 } from './utils/constants';
+import { removeTypeQuotes, cleanYaml, checkYamlForHiddenChars, validateYaml } from './utils/yaml-utils';
 
 export interface MiniWrekenfile {
   content: string;
@@ -39,20 +41,20 @@ export function generateMiniWrekenfiles(wrekenfileContent: string): MiniWrekenfi
     throw new Error("Argument 'wrekenfileContent' is required and must be a string");
   }
   
-  const data = yaml.load(wrekenfileContent) as WrekenfileData;
-  
-  if (!data.METHODS) {
-    throw new Error('No METHODS section found in Wrekenfile');
-  }
+    const data = yaml.load(wrekenfileContent) as WrekenfileData;
+    
+    if (!data.METHODS) {
+      throw new Error('No METHODS section found in Wrekenfile');
+    }
 
   const methodGroups = groupMethods(data.METHODS);
-  const miniWrekenfiles: MiniWrekenfile[] = [];
-  
+    const miniWrekenfiles: MiniWrekenfile[] = [];
+    
   for (const [groupKey, groupInfo] of Object.entries(methodGroups)) {
     miniWrekenfiles.push(createMiniWrekenfile(data, groupKey, groupInfo));
-  }
-  
-  return miniWrekenfiles;
+    }
+    
+    return miniWrekenfiles;
 }
 
 interface MethodGroupInfo {
@@ -115,7 +117,7 @@ function groupMethods(methods: Record<string, any>): Record<string, MethodGroupI
           type: 'sdk',
           source: source
         };
-      }
+    }
       groups[groupKey].methods[methodName] = methodData;
     } else {
       const groupKey = `${GROUP_PREFIX_OTHER}${methodName}`;
@@ -154,18 +156,20 @@ function createMiniWrekenfile(
     miniData.STRUCTS = requiredStructs;
   }
   
-  const content = yaml.dump(miniData, { 
-    indent: 2, 
-    lineWidth: -1,
-    noRefs: true 
-  });
+  let content = yaml.dump(miniData, YAML_DUMP_OPTIONS);
+  
+  // Post-process to ensure proper type quoting and formatting
+  content = removeTypeQuotes(content);
+  content = cleanYaml(content);
+  checkYamlForHiddenChars(content);
+  validateYaml(content);
   
   const methodList = Object.values(methods).map((method: any) => {
     return method.HTTP?.METHOD || method.INTERFACE?.NAME || Object.keys(methods)[0];
   }).filter(Boolean);
   
   const metadata: MiniWrekenfile['metadata'] = {
-    methods: methodList,
+      methods: methodList,
     structs: Object.keys(requiredStructs),
     filename: generateFilename(groupKey, type, endpoint, interfaceName, source)
   };
@@ -204,21 +208,21 @@ function collectRequiredStructs(
         for (const value of Object.values(input)) {
           const type = extractTypeFromInput(value);
           if (type) collectStructRefsFromType(type, structRefs);
+          }
         }
       }
-    }
     
     if (methodData.RETURNS) {
       for (const ret of methodData.RETURNS) {
         if (ret.RETURNTYPE) collectStructRefsFromType(ret.RETURNTYPE, structRefs);
-      }
-    }
+          }
+        }
     
     if (methodData.ERRORS) {
       for (const error of methodData.ERRORS) {
         if (error.TYPE) collectStructRefsFromType(error.TYPE, structRefs);
-      }
-    }
+          }
+        }
     
     if (methodData.ASYNC?.RESULT?.TYPE) {
       collectStructRefsFromType(methodData.ASYNC.RESULT.TYPE, structRefs);
