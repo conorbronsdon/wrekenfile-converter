@@ -2,7 +2,7 @@
  * Wrekenfile version constants
  */
 export const WREKENFILE_V1_VERSION = '1.2';
-export const WREKENFILE_V2_VERSION = '2.0.1';
+export const WREKENFILE_V2_VERSION = '2.0.2';
 
 /**
  * Get the default version (latest)

@@ -1,9 +1,6 @@
 import * as yaml from 'js-yaml';
 import * as fs from 'fs';
 import {
-  GROUP_PREFIX_HTTP,
-  GROUP_PREFIX_SDK,
-  GROUP_PREFIX_OTHER,
   MINI_FILENAME_PREFIX,
   YAML_EXTENSION,
   DEFAULT_MINI_OUTPUT_DIR,
@@ -12,7 +9,6 @@ import {
   FILENAME_LEADING_TRAILING_HYPHENS,
   FILENAME_LEADING_SLASHES,
   FILENAME_TRAILING_SLASHES,
-  YAML_DUMP_OPTIONS,
 } from './utils/constants';
 import { generateYamlString } from './utils/yaml-utils';
 
@@ -41,139 +37,265 @@ export function generateMiniWrekenfiles(wrekenfileContent: string): MiniWrekenfi
     throw new Error("Argument 'wrekenfileContent' is required and must be a string");
   }
   
-    const data = yaml.load(wrekenfileContent) as WrekenfileData;
-    
-    if (!data.METHODS) {
-      throw new Error('No METHODS section found in Wrekenfile');
-    }
-
-  const methodGroups = groupMethods(data.METHODS);
-    const miniWrekenfiles: MiniWrekenfile[] = [];
-    
-  for (const [groupKey, groupInfo] of Object.entries(methodGroups)) {
-    miniWrekenfiles.push(createMiniWrekenfile(data, groupKey, groupInfo));
-    }
-    
-    return miniWrekenfiles;
-}
-
-interface MethodGroupInfo {
-  methods: Record<string, any>;
-  type: 'http' | 'sdk' | 'other';
-  endpoint?: string;
-  interface?: string;
-  source?: string;
-}
-
-const BACKTICK = '`';
-const SLASH = '/';
-
-function normalizeEndpoint(endpoint: string): string {
-  endpoint = endpoint.trim();
-  if (endpoint.startsWith(BACKTICK) && endpoint.endsWith(BACKTICK)) {
-    endpoint = endpoint.slice(1, -1).trim();
-  }
-  if (endpoint.startsWith(SLASH)) {
-    endpoint = endpoint.substring(1);
-  }
-  return endpoint;
-}
-
-function groupMethods(methods: Record<string, any>): Record<string, MethodGroupInfo> {
-  const groups: Record<string, MethodGroupInfo> = {};
+  const data = yaml.load(wrekenfileContent) as WrekenfileData;
   
-  for (const [methodName, methodData] of Object.entries(methods)) {
-    if (methodData.HTTP?.ENDPOINT) {
-      const endpoint = normalizeEndpoint(methodData.HTTP.ENDPOINT);
-      const groupKey = `${GROUP_PREFIX_HTTP}${endpoint}`;
-      if (!groups[groupKey]) {
-        groups[groupKey] = {
-          methods: {},
-          type: 'http',
-          endpoint: endpoint
-        };
-      }
-      groups[groupKey].methods[methodName] = methodData;
-    } else if (methodData.INTERFACE?.NAME) {
-      const interfaceName = methodData.INTERFACE.NAME;
-      const source = methodData.SOURCE;
-      const groupKey = source ? `${GROUP_PREFIX_SDK}${source}:${interfaceName}` : `${GROUP_PREFIX_SDK}${interfaceName}`;
-      if (!groups[groupKey]) {
-        groups[groupKey] = {
-          methods: {},
-          type: 'sdk',
-          interface: interfaceName,
-          source: source
-        };
-      }
-      groups[groupKey].methods[methodName] = methodData;
-    } else if (methodData.SOURCE) {
-      // SDK methods with SOURCE but no INTERFACE.NAME - group by SOURCE
-      const source = methodData.SOURCE;
-      const groupKey = `${GROUP_PREFIX_SDK}${source}`;
-      if (!groups[groupKey]) {
-        groups[groupKey] = {
-          methods: {},
-          type: 'sdk',
-          source: source
-        };
-    }
-      groups[groupKey].methods[methodName] = methodData;
-    } else {
-      const groupKey = `${GROUP_PREFIX_OTHER}${methodName}`;
-      groups[groupKey] = {
-        methods: { [methodName]: methodData },
-        type: 'other'
-      };
-    }
+  if (!data.METHODS) {
+    throw new Error('No METHODS section found in Wrekenfile');
+  }
+
+  // v2.0.2-mini: One mini-wrekenfile per method (not grouped)
+  const miniWrekenfiles: MiniWrekenfile[] = [];
+  
+  for (const [methodId, methodData] of Object.entries(data.METHODS)) {
+    miniWrekenfiles.push(createMiniWrekenfile(data, methodId, methodData));
   }
   
-  return groups;
+  return miniWrekenfiles;
 }
+
+// v2.0.2-mini: No grouping needed - one mini-wrekenfile per method
 
 function createMiniWrekenfile(
   data: WrekenfileData, 
-  groupKey: string, 
-  groupInfo: MethodGroupInfo
+  methodId: string, 
+  methodData: any
 ): MiniWrekenfile {
-  const { methods, type, endpoint, interface: interfaceName, source } = groupInfo;
-  const requiredStructs = collectRequiredStructs(methods, data.STRUCTS || {});
-  
+  // Unified Mini-Wrekenfile v2.0.2: Execution-complete structure
   const miniData: any = {
-    VERSION: data.VERSION,
-    METHODS: methods,
+    VERSION: '2.0.2',
+    METHOD: {
+      ID: methodId,
+      SUMMARY: methodData.SUMMARY || '',
+    },
   };
-  
-  if (type === 'sdk' && source && data.SOURCES?.[source]) {
-    miniData.SOURCES = { [source]: data.SOURCES[source] };
+
+  // Add DESC if available
+  if (methodData.DESC) {
+    miniData.METHOD.DESC = methodData.DESC;
   }
-  
-  if (data.DEFAULTS && Object.keys(data.DEFAULTS).length > 0) {
-    miniData.DEFAULTS = data.DEFAULTS;
+
+  // EXECUTION section
+  const execution = methodData.EXECUTION || {};
+  miniData.EXECUTION = {
+    KIND: execution.KIND || (methodData.HTTP ? 'http' : (methodData.SDK ? 'sdk' : 'http')),
+    MODE: execution.MODE || 'async',
+    EXECUTION_LEVEL: 'standalone',
+  };
+
+  // HTTP section (optional but include if present)
+  if (methodData.HTTP) {
+    miniData.HTTP = {
+      METHOD: methodData.HTTP.METHOD,
+      ENDPOINT: methodData.HTTP.ENDPOINT,
+    };
+    
+    if (methodData.HTTP.CONTENT_TYPE) {
+      miniData.HTTP.CONTENT_TYPE = methodData.HTTP.CONTENT_TYPE;
+    }
+    if (methodData.HTTP.ACCEPT) {
+      miniData.HTTP.ACCEPT = methodData.HTTP.ACCEPT;
+    }
+    if (methodData.HTTP.HEADERS) {
+      miniData.HTTP.HEADERS = methodData.HTTP.HEADERS;
+    }
   }
-  
+
+  // SDK section (optional but include if present)
+  if (methodData.SDK) {
+    miniData.SDK = {
+      INTERFACE: methodData.SDK.INTERFACE ? {
+        NAME: methodData.SDK.INTERFACE.NAME,
+      } : undefined,
+      INVOCATION: methodData.SDK.INVOCATION ? {
+        TYPE: methodData.SDK.INVOCATION.TYPE,
+        RECEIVER: methodData.SDK.INVOCATION.RECEIVER,
+      } : undefined,
+    };
+    // Remove undefined fields
+    if (!miniData.SDK.INTERFACE) delete miniData.SDK.INTERFACE;
+    if (!miniData.SDK.INVOCATION) delete miniData.SDK.INVOCATION;
+    if (Object.keys(miniData.SDK).length === 0) delete miniData.SDK;
+  } else if (methodData.INTERFACE || methodData.INVOCATION) {
+    // Handle legacy format
+    miniData.SDK = {};
+    if (methodData.INTERFACE?.NAME) {
+      miniData.SDK.INTERFACE = {
+        NAME: methodData.INTERFACE.NAME,
+      };
+    }
+    if (methodData.INVOCATION) {
+      miniData.SDK.INVOCATION = {
+        TYPE: methodData.INVOCATION.TYPE,
+        RECEIVER: methodData.INVOCATION.RECEIVER,
+      };
+    }
+  }
+
+  // INPUTS section - keep LOCATION and all details
+  if (methodData.INPUTS && methodData.INPUTS.length > 0) {
+    miniData.INPUTS = methodData.INPUTS.map((input: any) => {
+      const inputKey = Object.keys(input)[0];
+      const inputValue = input[inputKey];
+      
+      if (typeof inputValue === 'string') {
+        // Simple form: - name: TYPE
+        // Need to determine LOCATION from context
+        const location = determineInputLocation(inputKey, methodData);
+        return {
+          name: inputKey,
+          TYPE: inputValue,
+          REQUIRED: true,
+          LOCATION: location,
+        };
+      } else if (typeof inputValue === 'object') {
+        // Extended form: - name: { TYPE: ..., REQUIRED: ..., LOCATION: ... }
+        const cleanedInput: any = {
+          name: inputKey,
+          TYPE: inputValue.TYPE,
+          REQUIRED: inputValue.REQUIRED !== undefined ? inputValue.REQUIRED : true,
+        };
+        // Keep LOCATION if present, otherwise determine from context
+        if (inputValue.LOCATION) {
+          cleanedInput.LOCATION = inputValue.LOCATION;
+        } else {
+          cleanedInput.LOCATION = determineInputLocation(inputKey, methodData);
+        }
+        // Keep DESC if present
+        if (inputValue.DESC) {
+          cleanedInput.DESC = inputValue.DESC;
+        }
+        return cleanedInput;
+      }
+      return null;
+    }).filter(Boolean);
+  }
+
+  // RETURNS section - single object with TYPE and DESC
+  if (methodData.RETURNS && methodData.RETURNS.length > 0) {
+    // Use the first return type
+    const firstReturn = methodData.RETURNS[0];
+    miniData.RETURNS = {
+      TYPE: firstReturn.RETURNTYPE || 'ANY',
+    };
+    if (firstReturn.DESC) {
+      miniData.RETURNS.DESC = firstReturn.DESC;
+    }
+  } else if (methodData.ASYNC?.RESULT?.TYPE) {
+    miniData.RETURNS = {
+      TYPE: methodData.ASYNC.RESULT.TYPE,
+    };
+  }
+
+  // ERRORS section (optional)
+  if (methodData.ERRORS && methodData.ERRORS.length > 0) {
+    miniData.ERRORS = methodData.ERRORS.map((error: any) => ({
+      TYPE: error.TYPE || 'ANY',
+      WHEN: error.WHEN || '',
+    }));
+  }
+
+  // STRUCTS section - collect and include required structs
+  const requiredStructs = collectRequiredStructs(methodData, data.STRUCTS || {});
   if (Object.keys(requiredStructs).length > 0) {
     miniData.STRUCTS = requiredStructs;
   }
-  
-  // Generate YAML string using the standard pipeline
+
+  // Generate YAML string
   const content = generateYamlString(miniData);
-  
-  const methodList = Object.values(methods).map((method: any) => {
-    return method.HTTP?.METHOD || method.INTERFACE?.NAME || Object.keys(methods)[0];
-  }).filter(Boolean);
-  
+
+  // Metadata
   const metadata: MiniWrekenfile['metadata'] = {
-      methods: methodList,
+    methods: [methodId],
     structs: Object.keys(requiredStructs),
-    filename: generateFilename(groupKey, type, endpoint, interfaceName, source)
+    filename: generateFilename(methodId, methodData),
   };
-  
-  if (endpoint) metadata.endpoint = `/${endpoint}`;
-  if (interfaceName) metadata.interface = interfaceName;
-  if (source) metadata.source = source;
-  
+
+  if (methodData.HTTP?.ENDPOINT) {
+    metadata.endpoint = methodData.HTTP.ENDPOINT;
+  }
+  if (miniData.SDK?.INTERFACE?.NAME) {
+    metadata.interface = miniData.SDK.INTERFACE.NAME;
+  }
+  if (methodData.SOURCE) {
+    metadata.source = methodData.SOURCE;
+  }
+
   return { content, metadata };
+}
+
+// Helper function to determine input location from context
+function determineInputLocation(inputKey: string, methodData: any): string {
+  // Check if it's a path parameter
+  if (methodData.HTTP?.ENDPOINT) {
+    const endpoint = methodData.HTTP.ENDPOINT;
+    if (endpoint.includes(`{${inputKey}}`) || endpoint.includes(`{{${inputKey}}}`)) {
+      return 'path';
+    }
+  }
+  
+  // Check if it's a header
+  if (methodData.HTTP?.HEADERS && methodData.HTTP.HEADERS[inputKey]) {
+    return 'header';
+  }
+  
+  // Check if it's body
+  if (inputKey === 'body' || methodData.HTTP?.BODY?.TYPE) {
+    return 'body';
+  }
+  
+  // Default to query for HTTP, sdk for SDK
+  if (methodData.HTTP) {
+    return 'query';
+  }
+  return 'sdk';
+}
+
+// Collect required structs for this method
+function collectRequiredStructs(methodData: any, allStructs: Record<string, any>): Record<string, any> {
+  const requiredStructs: Record<string, any> = {};
+  const processedStructs = new Set<string>();
+  const structRefs = new Set<string>();
+  
+  // Extract struct references from INPUTS
+  if (methodData.INPUTS) {
+    for (const input of methodData.INPUTS) {
+      for (const value of Object.values(input)) {
+        const type = extractTypeFromInput(value);
+        if (type) collectStructRefsFromType(type, structRefs);
+      }
+    }
+  }
+  
+  // Extract struct references from RETURNS
+  if (methodData.RETURNS) {
+    for (const ret of methodData.RETURNS) {
+      if (ret.RETURNTYPE) collectStructRefsFromType(ret.RETURNTYPE, structRefs);
+    }
+  }
+  
+  // Extract struct references from ERRORS
+  if (methodData.ERRORS) {
+    for (const error of methodData.ERRORS) {
+      if (error.TYPE) collectStructRefsFromType(error.TYPE, structRefs);
+    }
+  }
+  
+  // Extract from HTTP.BODY.TYPE
+  if (methodData.HTTP?.BODY?.TYPE) {
+    collectStructRefsFromType(methodData.HTTP.BODY.TYPE, structRefs);
+  }
+  
+  // Extract from ASYNC.RESULT.TYPE
+  if (methodData.ASYNC?.RESULT?.TYPE) {
+    collectStructRefsFromType(methodData.ASYNC.RESULT.TYPE, structRefs);
+  }
+  
+  // Recursively collect structs
+  for (const structName of structRefs) {
+    collectStructRecursively(structName, allStructs, requiredStructs, processedStructs);
+  }
+  
+  return requiredStructs;
 }
 
 function extractTypeFromInput(value: any): string | null {
@@ -189,48 +311,6 @@ function collectStructRefsFromType(type: string, structRefs: Set<string>): void 
   }
 }
 
-function collectRequiredStructs(
-  methods: Record<string, any>, 
-  allStructs: Record<string, any>
-): Record<string, any> {
-  const requiredStructs: Record<string, any> = {};
-  const processedStructs = new Set<string>();
-  const structRefs = new Set<string>();
-  
-  for (const methodData of Object.values(methods)) {
-    if (methodData.INPUTS) {
-      for (const input of methodData.INPUTS) {
-        for (const value of Object.values(input)) {
-          const type = extractTypeFromInput(value);
-          if (type) collectStructRefsFromType(type, structRefs);
-          }
-        }
-      }
-    
-    if (methodData.RETURNS) {
-      for (const ret of methodData.RETURNS) {
-        if (ret.RETURNTYPE) collectStructRefsFromType(ret.RETURNTYPE, structRefs);
-          }
-        }
-    
-    if (methodData.ERRORS) {
-      for (const error of methodData.ERRORS) {
-        if (error.TYPE) collectStructRefsFromType(error.TYPE, structRefs);
-          }
-        }
-    
-    if (methodData.ASYNC?.RESULT?.TYPE) {
-      collectStructRefsFromType(methodData.ASYNC.RESULT.TYPE, structRefs);
-    }
-  }
-  
-  for (const structName of structRefs) {
-    collectStructRecursively(structName, allStructs, requiredStructs, processedStructs);
-  }
-  
-  return requiredStructs;
-}
-
 function collectStructRecursively(
   structName: string,
   allStructs: Record<string, any>,
@@ -244,11 +324,25 @@ function collectStructRecursively(
   processedStructs.add(structName);
   requiredStructs[structName] = allStructs[structName];
   
-  const structFields = allStructs[structName];
-  if (Array.isArray(structFields)) {
-    for (const field of structFields) {
+  // Check for nested structs in fields
+  const structData = allStructs[structName];
+  if (Array.isArray(structData)) {
+    // Old format: array of fields
+    for (const field of structData) {
       if (field.type) {
         const nestedStructNames = extractAllStructNames(field.type);
+        for (const nestedStructName of nestedStructNames) {
+          if (nestedStructName) {
+            collectStructRecursively(nestedStructName, allStructs, requiredStructs, processedStructs);
+          }
+        }
+      }
+    }
+  } else if (structData && typeof structData === 'object' && structData.FIELDS) {
+    // New format: { DESC: ..., FIELDS: [...] }
+    for (const field of structData.FIELDS) {
+      if (field.TYPE) {
+        const nestedStructNames = extractAllStructNames(field.TYPE);
         for (const nestedStructName of nestedStructNames) {
           if (nestedStructName) {
             collectStructRecursively(nestedStructName, allStructs, requiredStructs, processedStructs);
@@ -284,34 +378,11 @@ function sanitizeFilename(name: string): string {
 }
 
 function generateFilename(
-  groupKey: string,
-  type: 'http' | 'sdk' | 'other',
-  endpoint?: string,
-  interfaceName?: string,
-  source?: string
+  methodId: string,
+  methodData: any
 ): string {
-  let cleanName: string;
-  
-  if (type === 'http' && endpoint) {
-    cleanName = sanitizeFilename(endpoint);
-  } else if (type === 'sdk') {
-    if (interfaceName) {
-      cleanName = sanitizeFilename(interfaceName);
-      if (source) {
-        const cleanSource = sanitizeFilename(source);
-        cleanName = `${cleanSource}-${cleanName}`;
-      }
-    } else if (source) {
-      // SDK methods grouped by SOURCE only (no interface name)
-      cleanName = sanitizeFilename(source);
-    } else {
-      // Fallback: use method name from groupKey
-      cleanName = sanitizeFilename(groupKey.replace(GROUP_PREFIX_SDK, ''));
-    }
-  } else {
-    cleanName = sanitizeFilename(groupKey.replace(GROUP_PREFIX_OTHER, ''));
-  }
-  
+  // v2.0.2-mini: One file per method, use method ID as filename
+  const cleanName = sanitizeFilename(methodId);
   return `${MINI_FILENAME_PREFIX}${cleanName}${YAML_EXTENSION}`;
 }
 
