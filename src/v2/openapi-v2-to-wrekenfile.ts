@@ -364,6 +364,22 @@ function getContentTypeAndBodyType(op: any, spec: any): { contentType: string; b
   return { contentType, bodyType };
 }
 
+function getAcceptContentType(op: any, spec: any): string {
+  // Get the first content type from the first success response (2xx)
+  for (const [code, response] of Object.entries<any>(op.responses || {})) {
+    const statusCode = parseInt(code);
+    if (statusCode >= 200 && statusCode < 300) {
+      // OpenAPI v2 uses produces array
+      const produces = op.produces || spec.produces || [CONTENT_TYPE_JSON];
+      if (produces.length > 0) {
+        return produces[0];
+      }
+    }
+  }
+  // Default to JSON if no response content type found
+  return CONTENT_TYPE_JSON;
+}
+
 function getHeadersForOperation(op: any, spec: any, method?: string, baseDir?: string): Record<string, string> {
   const { contentType } = getContentTypeAndBodyType(op, spec);
   
@@ -439,20 +455,8 @@ function extractParameters(op: any, spec: any, baseDir: string): any[] {
       
       const paramIn = param && typeof param === 'object' ? param.in || 'query' : 'query';
       
-      // Skip path parameters - they're already in the ENDPOINT
-      if (paramIn === 'path') {
-        continue;
-      }
-      
-      // Skip header parameters - they're in HTTP.HEADERS
-      if (paramIn === 'header') {
-        continue;
-      }
-      
-      // Only process query parameters
-      if (paramIn !== 'query') {
-        continue;
-      }
+      // v2.0.2: All parameters (path, query, header) must be in INPUTS with LOCATION
+      // Don't skip any - include all with LOCATION
       
       const paramName = param && typeof param === 'object' ? param.name : '';
       const paramSchema = param && typeof param === 'object' ? param.schema || {} : {};
@@ -468,19 +472,23 @@ function extractParameters(op: any, spec: any, baseDir: string): any[] {
         type = getTypeFromSchema(paramSchema, spec, baseDir);
       }
       
-      // Build input parameter in v2.0.1 format
-      // Use simple form if required and no default, extended form otherwise
+      // v2.0.2: All INPUTS must have LOCATION field
+      // Build input parameter with LOCATION
       if (isRequired && !hasDefault) {
-        // Simple form: - paramName: TYPE
+        // Simple form with LOCATION
         const inputParam: any = {};
-        inputParam[paramName] = type;
+        inputParam[paramName] = {
+          TYPE: type,
+          LOCATION: paramIn,
+        };
         inputParams.push(inputParam);
       } else {
-        // Extended form: - paramName: { TYPE: ..., REQUIRED: ..., DEFAULT: ... }
+        // Extended form with LOCATION
         const inputParam: any = {};
         inputParam[paramName] = {
           TYPE: type,
           REQUIRED: isRequired,
+          LOCATION: paramIn,
         };
         if (hasDefault) {
           inputParam[paramName].DEFAULT = paramSchema.default;
@@ -514,17 +522,22 @@ function extractRequestBody(op: any, operationId: string, method: string, path: 
     // In OpenAPI v2, body parameters default to false (optional) if not specified
     const isRequired = bodyParam && typeof bodyParam === 'object' ? bodyParam.required === true : false;
     
+    // v2.0.2: All INPUTS must have LOCATION field
     if (isRequired) {
-      // Simple form
+      // Simple form with LOCATION
       const inputParam: any = {};
-      inputParam.body = type;
+      inputParam.body = {
+        TYPE: type,
+        LOCATION: 'body',
+      };
       inputParams.push(inputParam);
     } else {
-      // Extended form
+      // Extended form with LOCATION
       const inputParam: any = {};
       inputParam.body = {
         TYPE: type,
         REQUIRED: false,
+        LOCATION: 'body',
       };
       inputParams.push(inputParam);
     }
@@ -540,14 +553,19 @@ function extractRequestBody(op: any, operationId: string, method: string, path: 
         const hasDefault = param.default !== undefined;
         
         const inputParam: any = {};
+        // v2.0.2: All INPUTS must have LOCATION field
         if (isRequired && !hasDefault) {
-          // Simple form
-          inputParam[param.name] = type;
+          // Simple form with LOCATION
+          inputParam[param.name] = {
+            TYPE: type,
+            LOCATION: 'body',
+          };
         } else {
-          // Extended form
+          // Extended form with LOCATION
           inputParam[param.name] = {
             TYPE: type,
             REQUIRED: isRequired,
+            LOCATION: 'body',
           };
           if (hasDefault) {
             inputParam[param.name].DEFAULT = param.default;
@@ -618,9 +636,11 @@ function extractResponses(op: any, operationId: string, method: string, path: st
       // Generate descriptive RETURNVAR name based on response code and operation
       const returnVarName = generateReturnVarName(operationId, code);
 
+      // v2.0.2: STATUS code is required in RETURNS
       const returnItem: any = {
         RETURNTYPE: returnType,
         RETURNVAR: returnVarName,
+        STATUS: statusCode,
       };
 
       // Check for pagination hints in response schema
@@ -689,10 +709,13 @@ function extractErrors(op: any, spec: any, baseDir: string): any[] {
       // Generate descriptive WHEN clause with HTTP status code
       when = generateErrorWhen(actualResponse, code);
 
-      errors.push({
+      // v2.0.2: STATUS code is required in ERRORS
+      const errorItem: any = {
         TYPE: errorType,
+        STATUS: statusCode || (code === 'default' ? 500 : parseInt(code)),
         WHEN: when,
-      });
+      };
+      errors.push(errorItem);
     }
   }
 
@@ -746,7 +769,7 @@ function extractMethods(spec: any, baseDir: string): Record<string, any> {
       const allParams = [...pathLevelParams, ...(op.parameters || [])];
       const opWithMergedParams = { ...op, parameters: allParams };
       
-      const { bodyType } = getContentTypeAndBodyType(opWithMergedParams, spec);
+      const { contentType, bodyType } = getContentTypeAndBodyType(opWithMergedParams, spec);
       const headers = getHeadersForOperation(opWithMergedParams, spec, method, baseDir);
       const pathQueryHeaderParams = extractParameters(opWithMergedParams, spec, baseDir);
       const bodyParams = extractRequestBody(opWithMergedParams, operationId, method, pathStr, spec, baseDir);
@@ -754,7 +777,10 @@ function extractMethods(spec: any, baseDir: string): Record<string, any> {
       const returns = extractResponses(opWithMergedParams, operationId, method, pathStr, spec, baseDir);
       const errors = extractErrors(opWithMergedParams, spec, baseDir);
 
-      // Build method in v2.0.1 format
+      // Get accept content type from responses
+      const acceptContentType = getAcceptContentType(opWithMergedParams, spec);
+
+      // Build method in v2.0.2 format
       const methodDef: any = {
         SUMMARY: summary,
       };
@@ -769,14 +795,25 @@ function extractMethods(spec: any, baseDir: string): Record<string, any> {
         METHOD: method.toUpperCase(),
         ENDPOINT: endpoint,
         HEADERS: headers,
+        CONTENT_TYPE: contentType,
+        ACCEPT: acceptContentType,
       };
+
+      // v2.0.2: BODY.TYPE should be STRUCT(...) format
+      if (bodyParams.length > 0 && bodyParams[0].body) {
+        const bodyTypeValue = bodyParams[0].body.TYPE || bodyParams[0].body;
+        methodDef.HTTP.BODY = {
+          TYPE: bodyTypeValue,
+        };
+      }
 
       if (bodyType !== BODYTYPE_RAW) {
         methodDef.HTTP.BODYTYPE = bodyType;
       }
 
-      // EXECUTION section (mandatory)
+      // EXECUTION section (mandatory) - v2.0.2 requires KIND
       methodDef.EXECUTION = {
+        KIND: 'http',
         MODE: EXECUTION_MODE_ASYNC, // HTTP methods default to async
       };
 

@@ -322,6 +322,28 @@ function getContentTypeAndBodyType(request: any): { contentType: string; bodyTyp
   return { contentType, bodyType };
 }
 
+function getAcceptContentType(item: any): string {
+  // Get the first content type from the first success response (2xx)
+  if (item.response) {
+    for (const response of item.response) {
+      const code = parseInt(response.code?.toString() || '200');
+      if (code >= 200 && code < 300) {
+        // Check Content-Type header in response
+        if (response.header) {
+          const acceptHeader = response.header.find((h: any) => 
+            h.key?.toLowerCase() === 'content-type'
+          );
+          if (acceptHeader?.value) {
+            return acceptHeader.value;
+          }
+        }
+      }
+    }
+  }
+  // Default to JSON if no response content type found
+  return CONTENT_TYPE_JSON;
+}
+
 function getHeadersForOperation(request: any, variables: Record<string, string>): Record<string, string> {
   const { contentType } = getContentTypeAndBodyType(request);
   const headerMap = new Map<string, string>();
@@ -359,13 +381,28 @@ function getHeadersForOperation(request: any, variables: Record<string, string>)
 function extractParameters(request: any, variables: Record<string, string>): any[] {
   const inputParams: any[] = [];
   
-  // Path variables are already in ENDPOINT (e.g., /users/{userId})
-  // Header parameters are in HTTP.HEADERS
-  // Only extract query parameters here
+  // v2.0.2: All parameters (path, query, header) must be in INPUTS with LOCATION
+  // Path variables are also in ENDPOINT (e.g., /users/{userId})
+  // Header parameters are also in HTTP.HEADERS
   
   const url = request.url;
   
-  // Extract query parameters only
+  // Extract path variables from URL
+  if (url?.raw || url?.path) {
+    const urlStr = url.raw || (Array.isArray(url.path) ? url.path.join('/') : url.path || '');
+    const pathMatches = urlStr.match(/\{\{(\w+)\}\}/g) || [];
+    for (const match of pathMatches) {
+      const varName = match.replace(/\{\{|\}\}/g, '');
+      const inputParam: any = {};
+      inputParam[varName] = {
+        TYPE: 'STRING',
+        LOCATION: 'path',
+      };
+      inputParams.push(inputParam);
+    }
+  }
+  
+  // Extract query parameters
   if (url?.query) {
     for (const query of url.query) {
       // Skip disabled query parameters
@@ -374,24 +411,55 @@ function extractParameters(request: any, variables: Record<string, string>): any
       }
       const isRequired = !query.disabled;
       const inputParam: any = {};
+      // v2.0.2: All INPUTS must have LOCATION field
       if (isRequired) {
-        // Simple form
-        inputParam[query.key] = 'STRING';
+        // Simple form with LOCATION
+        inputParam[query.key] = {
+          TYPE: 'STRING',
+          LOCATION: 'query',
+        };
       } else {
-        // Extended form
+        // Extended form with LOCATION
         inputParam[query.key] = {
           TYPE: 'STRING',
           REQUIRED: false,
+          LOCATION: 'query',
         };
       }
       inputParams.push(inputParam);
     }
   }
   
-  // Note: Path variables ({{var}} in URL) are NOT added to INPUTS
-  // They're already represented in the ENDPOINT as {var}
-  // Header parameters are NOT added to INPUTS
-  // They're in HTTP.HEADERS
+  // Extract header parameters (non-auth headers that should be in INPUTS)
+  if (request.header) {
+    for (const header of request.header) {
+      // Skip disabled headers
+      if (header.disabled) {
+        continue;
+      }
+      // Skip Content-Type and Authorization - they're in HTTP.HEADERS
+      const headerKey = header.key?.toLowerCase();
+      if (headerKey === 'content-type' || headerKey === 'authorization') {
+        continue;
+      }
+      const isRequired = !header.disabled;
+      const inputParam: any = {};
+      // v2.0.2: All INPUTS must have LOCATION field
+      if (isRequired) {
+        inputParam[header.key] = {
+          TYPE: 'STRING',
+          LOCATION: 'header',
+        };
+      } else {
+        inputParam[header.key] = {
+          TYPE: 'STRING',
+          REQUIRED: false,
+          LOCATION: 'header',
+        };
+      }
+      inputParams.push(inputParam);
+    }
+  }
   
   return inputParams;
 }
@@ -404,9 +472,11 @@ function extractRequestBody(request: any, itemName: string, method: string, path
     if (bodyData) {
       const requestStructName = generateStructName(itemName, method, path, 'Request');
       const inputParam: any = {};
+      // v2.0.2: All INPUTS must have LOCATION field
       inputParam.body = {
         TYPE: `STRUCT(${requestStructName})`,
         REQUIRED: true,
+        LOCATION: 'body',
       };
       inputParams.push(inputParam);
     }
@@ -419,12 +489,17 @@ function extractRequestBody(request: any, itemName: string, method: string, path
       const type = field.type === 'file' ? 'STRING' : 'STRING';
       const isRequired = !field.disabled;
       const inputParam: any = {};
+      // v2.0.2: All INPUTS must have LOCATION field
       if (isRequired) {
-        inputParam[field.key] = type;
+        inputParam[field.key] = {
+          TYPE: type,
+          LOCATION: 'body',
+        };
       } else {
         inputParam[field.key] = {
           TYPE: type,
           REQUIRED: false,
+          LOCATION: 'body',
         };
       }
       inputParams.push(inputParam);
@@ -477,9 +552,11 @@ function extractResponses(item: any, itemName: string, method: string, path: str
           .toLowerCase();
         const returnVarName = generateReturnVarName(cleanItemName, code);
         
+        // v2.0.2: STATUS code is required in RETURNS
         returns.push({
           RETURNTYPE: returnType,
           RETURNVAR: returnVarName,
+          STATUS: statusCode,
         });
       }
     }
@@ -509,8 +586,10 @@ function extractErrors(item: any, itemName: string, method: string, path: string
       
       when = generateErrorWhen(response, code.toString());
       
+      // v2.0.2: STATUS code is required in ERRORS
       errors.push({
         TYPE: errorType,
+        STATUS: code,
         WHEN: when,
       });
     }
@@ -545,7 +624,7 @@ function extractOperations(collection: any, variables: Record<string, string>): 
       operationId = getUniqueOperationName(operationId);
       
       const summary = generateSummary(item, method, path);
-      const { bodyType } = getContentTypeAndBodyType(item.request);
+      const { contentType, bodyType } = getContentTypeAndBodyType(item.request);
       const headers = getHeadersForOperation(item.request, variables);
       const inputs = extractParameters(item.request, variables);
       const bodyInputs = extractRequestBody(item.request, itemName, method, path);
@@ -556,7 +635,7 @@ function extractOperations(collection: any, variables: Record<string, string>): 
         allInputs.push(...bodyInputs);
       }
       
-      // Build method in v2.0.1 format
+      // Build method in v2.0.2 format
       const methodDef: any = {
         SUMMARY: summary,
       };
@@ -567,19 +646,33 @@ function extractOperations(collection: any, variables: Record<string, string>): 
         methodDef.DESC = desc;
       }
 
+      // Get accept content type from responses
+      const acceptContentType = getAcceptContentType(item);
+
       // HTTP section (mandatory for API methods)
       methodDef.HTTP = {
         METHOD: method.toUpperCase(),
         ENDPOINT: `/${path}`,
         HEADERS: headers,
+        CONTENT_TYPE: contentType,
+        ACCEPT: acceptContentType,
       };
+
+      // v2.0.2: BODY.TYPE should be STRUCT(...) format
+      if (bodyInputs.length > 0 && bodyInputs[0].body) {
+        const bodyTypeValue = bodyInputs[0].body.TYPE || bodyInputs[0].body;
+        methodDef.HTTP.BODY = {
+          TYPE: bodyTypeValue,
+        };
+      }
 
       if (bodyType !== BODYTYPE_RAW) {
         methodDef.HTTP.BODYTYPE = bodyType;
       }
 
-      // EXECUTION section (mandatory)
+      // EXECUTION section (mandatory) - v2.0.2 requires KIND
       methodDef.EXECUTION = {
+        KIND: 'http',
         MODE: EXECUTION_MODE_ASYNC, // HTTP methods default to async
       };
 
