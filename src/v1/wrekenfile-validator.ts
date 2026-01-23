@@ -134,7 +134,7 @@ function parseYamlRobust(fileContent: string): WrekenfileStructure | null {
     // First try normal YAML parsing
     return yaml.load(fileContent) as WrekenfileStructure;
   } catch (error) {
-    console.log('⚠️  Standard YAML parsing failed, attempting to fix formatting...');
+    console.log('Standard YAML parsing failed, attempting to fix formatting...');
     
     try {
       // Try to fix common YAML formatting issues
@@ -143,7 +143,7 @@ function parseYamlRobust(fileContent: string): WrekenfileStructure | null {
       // Try parsing the fixed content
       return yaml.load(fixedContent) as WrekenfileStructure;
     } catch (secondError) {
-      console.log('❌ Could not parse YAML even after fixing formatting');
+      console.log('Could not parse YAML even after fixing formatting');
       return null;
     }
   }
@@ -649,31 +649,31 @@ function validateCrossReferences(data: WrekenfileStructure, result: ValidationRe
 }
 
 function printValidationResult(result: ValidationResult): void {
-  console.log('🔍 Wrekenfile Validation Results:');
+  console.log('Wrekenfile Validation Results:');
   console.log('=====================================');
   
   if (result.isValid) {
-    console.log('✅ Wrekenfile is VALID');
+    console.log('Wrekenfile is VALID');
   } else {
-    console.log('❌ Wrekenfile is INVALID');
+    console.log('Wrekenfile is INVALID');
   }
 
   if (result.errors.length > 0) {
-    console.log('\n🚨 Errors:');
+    console.log('\nErrors:');
     result.errors.forEach((error, index) => {
       console.log(`  ${index + 1}. ${error}`);
     });
   }
 
   if (result.warnings.length > 0) {
-    console.log('\n⚠️  Warnings:');
+    console.log('\nWarnings:');
     result.warnings.forEach((warning, index) => {
       console.log(`  ${index + 1}. ${warning}`);
     });
   }
 
   if (result.errors.length === 0 && result.warnings.length === 0) {
-    console.log('\n🎉 No issues found!');
+    console.log('\nNo issues found!');
   }
 }
 
@@ -694,18 +694,18 @@ function main() {
   const shouldFix = args.includes('--fix');
   
   if (!filePath) {
-    console.error('❌ Error: No Wrekenfile path provided');
+    console.error('Error: No Wrekenfile path provided');
     process.exit(1);
   }
   
   if (!fs.existsSync(filePath)) {
-    console.error(`❌ Error: File '${filePath}' does not exist`);
+    console.error(`Error: File '${filePath}' does not exist`);
     process.exit(1);
   }
   
   if (shouldFix) {
     try {
-      console.log('🔧 Attempting to fix Wrekenfile...');
+      console.log('Attempting to fix Wrekenfile...');
       
       // Read the original file
       const fileContent = fs.readFileSync(filePath, 'utf8');
@@ -717,26 +717,26 @@ function main() {
       const data = yaml.load(fixedContent) as WrekenfileStructure;
       
       if (!data) {
-        console.error('❌ Error: Could not parse the file even after fixing');
+        console.error('Error: Could not parse the file even after fixing');
         process.exit(1);
       }
       
       // Create backup
       const backupPath = `${filePath}.backup`;
       fs.writeFileSync(backupPath, fileContent);
-      console.log(`📁 Backup created at: ${backupPath}`);
+      console.log(`Backup created at: ${backupPath}`);
       
       // Write fixed file
       fs.writeFileSync(filePath, fixedContent);
-      console.log('✅ Wrekenfile has been fixed and saved!');
+      console.log('Wrekenfile has been fixed and saved!');
       
       // Validate the fixed file
-      console.log('\n🔍 Validating fixed Wrekenfile...');
+      console.log('\nValidating fixed Wrekenfile...');
       const result = validateWrekenfile(filePath);
       printValidationResult(result);
       
     } catch (error: any) {
-      console.error(`❌ Error fixing Wrekenfile: ${error.message}`);
+      console.error(`Error fixing Wrekenfile: ${error.message}`);
       process.exit(1);
     }
   } else {

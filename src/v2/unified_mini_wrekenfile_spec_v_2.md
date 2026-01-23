@@ -9,11 +9,11 @@ This spec is intentionally minimal but **semantically complete** at the executio
 
 ## Design Goals
 
-- ✅ Execution-complete for **HTTP APIs** and **SDKs**
-- ✅ Safe for **vector database storage** (Pinecone, etc.)
-- ✅ No implicit inference or conventions
-- ✅ No dependency on full Wrekenfiles
-- ✅ Human-readable and LLM-safe
+- Execution-complete for **HTTP APIs** and **SDKs**
+- Safe for **vector database storage** (Pinecone, etc.)
+- No implicit inference or conventions
+- No dependency on full Wrekenfiles
+- Human-readable and LLM-safe
 
 ---
 
