@@ -16,14 +16,14 @@ async function main() {
   const [inputFile, outputFile, envFile] = args;
 
   if (!fs.existsSync(inputFile)) {
-    console.error(`❌ Input file not found: ${inputFile}`);
+    console.error(`Input file not found: ${inputFile}`);
     process.exit(1);
   }
 
   let variables = {};
   if (envFile) {
     if (!fs.existsSync(envFile)) {
-      console.error(`❌ Environment file not found: ${envFile}`);
+      console.error(`Environment file not found: ${envFile}`);
       process.exit(1);
     }
     variables = loadEnvironmentFile(envFile);
@@ -34,9 +34,9 @@ async function main() {
     const postmanCollection = JSON.parse(postmanContent);
     const wrekenfileYaml = generateWrekenfile(postmanCollection, variables);
     fs.writeFileSync(outputFile, wrekenfileYaml);
-    console.log(`✅ Wrekenfile generated: ${outputFile}`);
+    console.log(`Wrekenfile generated: ${outputFile}`);
   } catch (error) {
-    console.error(`❌ Error generating Wrekenfile: ${(error as any).message}`);
+    console.error(`Error generating Wrekenfile: ${(error as any).message}`);
     process.exit(1);
   }
 }

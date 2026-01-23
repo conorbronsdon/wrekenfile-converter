@@ -325,7 +325,7 @@ src/
 │   ├── mini-wrekenfile-generator.ts
 │   ├── wrekenfile-validator.ts
 │   └── cli/                        # CLI tools for v1
-└── v2/                             # Wrekenfile spec v2.0.2
+└── v2/                             # Wreken spec v2.0.2
     ├── index.ts
     ├── openapi-to-wreken.ts
     ├── openapi-v2-to-wrekenfile.ts
