@@ -52,7 +52,7 @@ async function main() {
 
   try {
     saveMiniWrekenfiles(miniWrekenfiles, outputDir);
-    console.log(`✅ Generated ${miniWrekenfiles.length} mini Wrekenfiles in ${outputDir}`);
+    console.log(`Generated ${miniWrekenfiles.length} mini Wrekenfiles in ${outputDir}`);
     for (const mini of miniWrekenfiles) {
       console.log(`  - ${mini.metadata.filename}`);
     }

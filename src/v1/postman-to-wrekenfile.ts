@@ -124,7 +124,7 @@ function loadEnvironmentFile(envPath: string): Record<string, string> {
     
     return variables;
   } catch (error) {
-    console.warn(`⚠️  Warning: Could not load environment file ${envPath}:`, error);
+    console.warn(`Warning: Could not load environment file ${envPath}:`, error);
     return {};
   }
 }
