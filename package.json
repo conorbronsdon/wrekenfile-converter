@@ -24,15 +24,21 @@
     "vector-db",
     "ai"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": {
+    "name": "Swytchcode Technologies Inc",
+    "email": "hello@swytchcode.com",
+    "url": "https://swytchcode.com"
+  },
+  "homepage": "https://wreken.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/swytchcode/wrekenfile-converter.git"
+  },
+  "license": "MIT",
   "files": [
     "dist/**/*",
     "README.md",
-    "USAGE.md",
-    "LOCAL_TESTING.md",
-    "QUICK_START.md",
-    "wrekenfile.md"
+    "LICENSE"
   ],
   "exports": {
     ".": {
