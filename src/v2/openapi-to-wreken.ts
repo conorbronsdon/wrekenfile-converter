@@ -33,7 +33,8 @@ import { generateReturnVarName, generateErrorWhen } from './utils/response-utils
 import { mapOpenApiType, Primitive } from './utils/type-utils';
 import { generateOpenApiSummary } from './utils/summary-utils';
 import { validateOpenApiV3Spec, validateBaseDir, logError, createConverterError } from './utils/error-utils';
-import { resolveCanonicalIds, type MethodCanonicalInput } from './utils/canonical-id';
+import { resolveCanonicalIds, computeCanonicalId, type MethodCanonicalInput } from './utils/canonical-id';
+import { filterStructsByUsage } from './utils/struct-utils';
 
 const externalRefCache: Record<string, any> = {};
 
@@ -220,13 +221,10 @@ function parseSchema(name: string, schema: any, spec: any, baseDir: string, dept
   return fields;
 }
 
-function generateStructName(operationId: string, method: string, path: string, suffix: string): string {
-  if (operationId) {
-    return `${operationId}${suffix}`;
-  }
-  // Generate from path and method
-  const pathParts = path.replace(/[\/{}]/g, '_').replace(/^_|_$/g, '');
-  return `${method}_${pathParts}${suffix}`;
+function generateStructName(_operationId: string, method: string, path: string, suffix: string): string {
+  // Use canonical ID as the base for inline request/response struct names
+  const canonicalId = computeCanonicalId(method.toUpperCase(), path);
+  return `${canonicalId}${suffix}`;
 }
 
 function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
@@ -906,6 +904,36 @@ function extractSecurityDefaults(spec: any): Record<string, string> {
   return defs;
 }
 
+function updateReturnVarsUsingCanonicalId(methods: Record<string, any>): void {
+  for (const methodData of Object.values<any>(methods)) {
+    const canonicalId: string | undefined = methodData.CANONICAL_ID;
+    if (!canonicalId || !Array.isArray(methodData.RETURNS)) continue;
+
+    const baseVar = canonicalId.replace(/\./g, '_');
+
+    for (const ret of methodData.RETURNS) {
+      const status = ret.STATUS;
+      if (status === 200 || status === '200') {
+        ret.RETURNVAR = baseVar;
+      } else if (status !== undefined && status !== null) {
+        ret.RETURNVAR = `${baseVar}_${status}`;
+      } else {
+        ret.RETURNVAR = baseVar;
+      }
+    }
+  }
+}
+
+function renameMethodsToCanonicalId(methods: Record<string, any>): Record<string, any> {
+  const renamed: Record<string, any> = {};
+  for (const [oldId, methodData] of Object.entries<any>(methods)) {
+    const canonicalId: string | undefined = methodData.CANONICAL_ID;
+    const key = canonicalId || oldId;
+    renamed[key] = methodData;
+  }
+  return renamed;
+}
+
 
 function generateWrekenfile(spec: any, baseDir: string): string {
   try {
@@ -936,6 +964,9 @@ function generateWrekenfile(spec: any, baseDir: string): string {
       }
     }
 
+    // Update RETURNVARs to be derived from CANONICAL_ID
+    updateReturnVarsUsingCanonicalId(methods);
+
   const wrekenfile: any = {
     VERSION: WREKENFILE_VERSION,
   };
@@ -945,13 +976,17 @@ function generateWrekenfile(spec: any, baseDir: string): string {
     wrekenfile.DEFAULTS = defaults;
   }
 
-  // Add METHODS (mandatory)
-  wrekenfile.METHODS = methods;
+  // Add METHODS (mandatory) - use CANONICAL_ID as key when available
+  const renamedMethods = renameMethodsToCanonicalId(methods);
+  wrekenfile.METHODS = renamedMethods;
 
   // Add STRUCTS if we have any
   if (Object.keys(structs).length > 0) {
     wrekenfile.STRUCTS = structs;
   }
+
+  // Remove unused STRUCTS (keep only those referenced by METHODS)
+  filterStructsByUsage(wrekenfile);
 
     // Generate YAML string using the standard pipeline
     return generateYamlString(wrekenfile);

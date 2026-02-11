@@ -6,8 +6,26 @@
 
 /** Known action verbs (fixed dictionary) */
 const STANDARD_VERBS = new Set([
-  'list', 'get', 'create', 'update', 'delete', 'install', 'remove', 'execute',
-  'retry', 'initialize', 'upload', 'download', 'connect', 'invite', 'restart',
+  'list',
+  'get',
+  'create',
+  'update',
+  'delete',
+  'install',
+  'remove',
+  'execute',
+  'retry',
+  'initialize',
+  'upload',
+  'download',
+  'connect',
+  'invite',
+  'restart',
+  'generate',
+  'refresh',
+  'check',
+  'validate',
+  'migrate',
 ]);
 
 /** Verb-first form for compound actions (kebab segment → camelCase with verb first) */
@@ -38,11 +56,17 @@ function normalizePath(path: string): string {
 }
 
 /**
- * Split path into segments and remove path-parameter segments ({id}, {foo}, etc).
+ * Split path into segments and remove path-parameter segments ({id}, {foo}, :id, etc).
  */
 function pathSegmentsWithoutParams(path: string): string[] {
   const segments = path.split('/').filter(Boolean);
-  return segments.filter((s) => !/^\{[^}]+\}$/.test(s) && !/^\{[^}]*\}$/.test(s));
+  return segments.filter((s) => {
+    // Remove {param} style
+    if (s.startsWith('{') && s.endsWith('}')) return false;
+    // Remove :param style
+    if (s.startsWith(':')) return false;
+    return true;
+  });
 }
 
 /**
@@ -69,8 +93,10 @@ function toCamelCase(segment: string): string {
 }
 
 /**
- * For a trailing action segment like "helm-release-remove", produce "removeHelmRelease".
- * If segment is a single noun (e.g. "shell"), produce "executeShell".
+ * For an action-related segment:
+ * - If it ends with "-<verb>", move verb to front: "helm-release-remove" -> "removeHelmRelease"
+ * - If it's a single noun (e.g. "shell"), produce "executeShell"
+ * - Otherwise, just kebab/snake -> camelCase
  */
 function actionSegmentToCamel(segment: string): string {
   const lower = segment.toLowerCase();
@@ -89,51 +115,127 @@ function actionSegmentToCamel(segment: string): string {
 }
 
 /**
+ * Extract the primary verb for a method from remaining path segments and HTTP method.
+ * SINGLE VERB RULE: only one verb is allowed; we keep the first one we find.
+ */
+function extractPrimaryVerb(
+  remaining: string[],
+  httpMethod: string,
+  hasIdInPath: boolean
+): string {
+  const foundVerbs: string[] = [];
+
+  for (const segment of remaining) {
+    const lower = segment.toLowerCase();
+
+    // Segment exactly matches a verb
+    if (STANDARD_VERBS.has(lower)) {
+      foundVerbs.push(lower);
+      continue;
+    }
+
+    // Segment ends with -verb (e.g. "helm-release-remove")
+    for (const verb of STANDARD_VERBS) {
+      if (lower.endsWith('-' + verb)) {
+        foundVerbs.push(verb);
+        break;
+      }
+    }
+  }
+
+  if (foundVerbs.length > 0) {
+    // SINGLE VERB RULE: first verb only, ignore all others
+    return foundVerbs[0];
+  }
+
+  // Fallback: derive verb from HTTP method
+  switch ((httpMethod || 'GET').toUpperCase()) {
+    case 'GET':
+      return hasIdInPath ? 'get' : 'list';
+    case 'POST':
+      return 'create';
+    case 'PUT':
+    case 'PATCH':
+      return 'update';
+    case 'DELETE':
+      return 'delete';
+    default:
+      return 'execute';
+  }
+}
+
+/**
+ * Extract at most ONE subresource from remaining segments, based on nouns before the verb.
+ * We pick the last meaningful noun before the verb (most specific).
+ */
+function extractSubresource(remaining: string[], verb: string): string | null {
+  if (remaining.length === 0) return null;
+
+  // Find index of the verb in remaining segments (if present)
+  const verbIndex = remaining.findIndex((s) => {
+    const lower = s.toLowerCase();
+    if (STANDARD_VERBS.has(lower)) return true;
+    const parts = lower.split('-');
+    return parts.length > 1 && STANDARD_VERBS.has(parts[parts.length - 1] || '');
+  });
+
+  const beforeVerb =
+    verbIndex >= 0 ? remaining.slice(0, verbIndex) : remaining;
+
+  if (beforeVerb.length === 0) return null;
+
+  // Walk backwards to find last noun-like segment (not a verb)
+  for (let i = beforeVerb.length - 1; i >= 0; i--) {
+    const segment = beforeVerb[i];
+    const lower = segment.toLowerCase();
+    if (STANDARD_VERBS.has(lower)) continue;
+    return toCamelCase(segment);
+  }
+
+  return null;
+}
+
+/**
  * Compute base canonical ID from HTTP method and path. Deterministic; no collision handling.
- * Format: namespace.resource.action
+ * Enforces grammar: <namespace>.<resource>[.<subresource>].<action>
  */
 export function computeCanonicalId(httpMethod: string, path: string): string {
   const normalized = normalizePath(path);
   const segments = pathSegmentsWithoutParams(normalized);
 
-  const method = (httpMethod || 'GET').toUpperCase();
-
-  // Default namespace if path is empty or only had params
-  const namespace = segments.length > 0 ? segments[0].toLowerCase() : 'api';
-  const resource =
-    segments.length > 1 ? singularize(segments[1]) : singularize(segments[0] || 'resource');
-  const hasIdInPath = /\/\{[^}]+\}(\/|$)/.test(path);
-
-  // Action: map HTTP + path shape to verb or custom action
-  let action: string;
-
-  if (segments.length <= 2) {
-    // Base resource path: /api/clusters or /api/clusters/{id}
-    switch (method) {
-      case 'GET':
-        action = hasIdInPath ? 'get' : 'list';
-        break;
-      case 'POST':
-        action = 'create';
-        break;
-      case 'PUT':
-      case 'PATCH':
-        action = 'update';
-        break;
-      case 'DELETE':
-        action = 'delete';
-        break;
-      default:
-        action = method.toLowerCase();
-    }
-  } else {
-    // Extra segments: e.g. /api/clusters/{id}/install-promstack
-    const actionSegments = segments.slice(2);
-    action = actionSegments.map((s) => actionSegmentToCamel(s)).join('');
-    if (!action) action = method === 'POST' ? 'create' : 'execute';
+  if (segments.length === 0) {
+    return 'api.resource.execute';
   }
 
-  return `${namespace}.${resource}.${action}`;
+  const method = (httpMethod || 'GET').toUpperCase();
+
+  // namespace and primary resource
+  const namespace = segments[0].toLowerCase();
+  const resource =
+    segments.length > 1 ? singularize(segments[1]) : singularize(segments[0] || 'resource');
+
+  const remaining = segments.slice(2);
+  const hasIdInPath =
+    /\/\{[^}]+\}(\/|$)/.test(path) || /\/:[^/]+(\/|$)/.test(path);
+
+  // SINGLE VERB RULE: extract one primary verb
+  const verb = extractPrimaryVerb(remaining, method, hasIdInPath);
+
+  // Optional subresource (at most one)
+  const subresource = extractSubresource(remaining, verb);
+
+  const parts: string[] = [namespace, resource];
+  if (subresource) {
+    parts.push(subresource);
+  }
+  parts.push(verb);
+
+  // MAX 4 SEGMENTS RULE: if exceeded, collapse to namespace.resource.verb
+  if (parts.length > 4) {
+    return [parts[0], parts[1], parts[parts.length - 1]].join('.');
+  }
+
+  return parts.join('.');
 }
 
 /**
@@ -223,38 +325,17 @@ export function resolveCanonicalIds(
     }
   }
 
-  // Resolve pending collisions: extend with next path segment (subresource.action), then hash
+  // Resolve pending collisions: use hash-based suffix for uniqueness (no extra verbs)
   for (const p of pending) {
-    const normalized = normalizePath(p.endpoint);
-    const segments = pathSegmentsWithoutParams(normalized);
-    let candidate = p.baseId;
-    
-    // Try extending with subresource segments
-    if (segments.length > 2) {
-      const extra = segments.slice(2);
-      const subAction = extra.map((s) => actionSegmentToCamel(s)).join('');
-      if (subAction) {
-        // e.g. api.cluster.restart -> api.cluster.machineRestart
-        const prefix = p.baseId.replace(/\.[^.]+$/, '');
-        candidate = prefix + '.' + subAction.charAt(0).toLowerCase() + subAction.slice(1);
-      }
+    // Always keep the baseId semantic; just append a deterministic hash to disambiguate
+    let candidate = p.baseId + '_' + shortHash(p.endpoint + p.methodId);
+    let finalCandidate = candidate;
+    let attempts = 0;
+    while (!tryAssign(p.methodId, finalCandidate) && attempts < 10) {
+      finalCandidate = p.baseId + '_' + shortHash(p.endpoint + p.methodId + attempts.toString());
+      attempts++;
     }
-    
-    // Try assigning the candidate (may still collide if multiple pending items extend to same candidate)
-    if (!tryAssign(p.methodId, candidate)) {
-      // Still colliding: use hash-based fallback (guaranteed unique per methodId)
-      // Hash includes methodId which is unique, so this will always succeed
-      candidate = p.baseId + '_' + shortHash(p.endpoint + p.methodId);
-      // Ensure uniqueness: if hash somehow collides (extremely rare), append methodId hash
-      let finalCandidate = candidate;
-      let attempts = 0;
-      while (!tryAssign(p.methodId, finalCandidate) && attempts < 10) {
-        finalCandidate = p.baseId + '_' + shortHash(p.endpoint + p.methodId + attempts.toString());
-        attempts++;
-      }
-      candidate = finalCandidate;
-    }
-    result.set(p.methodId, candidate);
+    result.set(p.methodId, finalCandidate);
   }
 
   // Final validation: ensure no duplicates (safety check)
