@@ -31,7 +31,8 @@ import {
 import { generateReturnVarName, generateErrorWhen } from './utils/response-utils';
 import { Primitive } from './utils/type-utils';
 import { validatePostmanCollection, logError, createConverterError } from './utils/error-utils';
-import { resolveCanonicalIds, type MethodCanonicalInput } from './utils/canonical-id';
+import { resolveCanonicalIds, computeCanonicalId, type MethodCanonicalInput } from './utils/canonical-id';
+import { filterStructsByUsage } from './utils/struct-utils';
 
 function mapType(value: any): Primitive {
   if (typeof value === 'string') {
@@ -75,10 +76,11 @@ function generateSummary(item: any, method: string, path: string): string {
   return `${verb} ${entity}`;
 }
 
-function generateStructName(itemName: string, method: string, path: string, suffix: string): string {
-  const cleanName = itemName.replace(/[^a-zA-Z0-9]/g, '');
-  const cleanPath = path.replace(/[\/{}]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-  return `${method.toLowerCase()}-${cleanPath}-${suffix}`;
+function generateStructName(_itemName: string, method: string, path: string, suffix: string): string {
+  // Use canonical ID as the semantic base for Postman-derived structs
+  // (Request, ResponseXXX). This keeps struct names aligned with methods.
+  const canonicalId = computeCanonicalId(method.toUpperCase(), path);
+  return `${canonicalId}${suffix}`;
 }
 
 function parseJsonExample(jsonStr: string): any {
@@ -251,27 +253,29 @@ function extractStructs(collection: any, variables: Record<string, string>): Rec
   return structs;
 }
 
-function extractNestedStructs(obj: any, structs: Record<string, any[]>, prefix = ''): void {
+function extractNestedStructs(obj: any, structs: Record<string, any[]>, basePrefix = ''): void {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
   
   for (const [key, value] of Object.entries(obj)) {
     if (Array.isArray(value) && value.length > 0) {
       const firstItem = value[0];
       if (typeof firstItem === 'object' && firstItem !== null) {
-        const structName = `${prefix}${key}Item`;
+        const structName = `${basePrefix}${key}Item`;
         const fields = extractFieldsFromObject(firstItem, 0, structName);
         if (fields.length > 0) {
           structs[structName] = fields;
         }
-        extractNestedStructs(firstItem, structs, `${prefix}${key}Item`);
+        // For deeper levels, keep using the same base prefix to avoid runaway name growth
+        extractNestedStructs(firstItem, structs, basePrefix);
       }
     } else if (typeof value === 'object' && value !== null) {
-      const structName = `${prefix}${key}`;
+      const structName = `${basePrefix}${key}`;
       const fields = extractFieldsFromObject(value, 0, structName);
       if (fields.length > 0) {
         structs[structName] = fields;
       }
-      extractNestedStructs(value, structs, `${prefix}${key}`);
+      // For deeper levels, keep using the same base prefix
+      extractNestedStructs(value, structs, basePrefix);
     }
   }
 }
@@ -283,6 +287,8 @@ function extractPathFromUrl(url: any, variables: Record<string, string>): string
     path = path.replace(/^https?:\/\/[^\/]+/, ''); // Remove protocol and host
     // Remove base URL variables like {{url}} from path (they belong in base URL)
     path = path.replace(/\{\{url\}\}/gi, '');
+    // Strip query string if present
+    path = path.split('?')[0];
     // Convert Postman path variables {{var}} to OpenAPI-style {var}
     path = path.replace(/\{\{([^}]+)\}\}/g, '{$1}');
     path = path.replace(/\/+/g, '/'); // Normalize slashes
@@ -873,12 +879,42 @@ function generateWrekenfile(collection: any, variables: Record<string, string>):
       }
     }
 
-    wrekenfile.METHODS = methods;
+    // Update RETURNVARs to be derived from CANONICAL_ID
+    for (const methodData of Object.values<any>(methods)) {
+      const canonicalId: string | undefined = methodData.CANONICAL_ID;
+      if (!canonicalId || !Array.isArray(methodData.RETURNS)) continue;
+
+      const baseVar = canonicalId.replace(/\./g, '_');
+
+      for (const ret of methodData.RETURNS) {
+        const status = ret.STATUS;
+        if (status === 200 || status === '200') {
+          ret.RETURNVAR = baseVar;
+        } else if (status !== undefined && status !== null) {
+          ret.RETURNVAR = `${baseVar}_${status}`;
+        } else {
+          ret.RETURNVAR = baseVar;
+        }
+      }
+    }
+
+    // Use CANONICAL_ID as key when available
+    const renamedMethods: Record<string, any> = {};
+    for (const [oldId, methodData] of Object.entries<any>(methods)) {
+      const canonicalId: string | undefined = methodData.CANONICAL_ID;
+      const key = canonicalId || oldId;
+      renamedMethods[key] = methodData;
+    }
+
+    wrekenfile.METHODS = renamedMethods;
 
     // Add STRUCTS if we have any
     if (Object.keys(structs).length > 0) {
       wrekenfile.STRUCTS = structs;
     }
+
+    // Remove unused STRUCTS (keep only those referenced by METHODS)
+    filterStructsByUsage(wrekenfile);
 
     // Generate YAML string using the standard pipeline
     return generateYamlString(wrekenfile);
