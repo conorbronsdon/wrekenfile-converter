@@ -10,7 +10,8 @@
     "prebuild": "npm run clean",
     "dev": "tsc --watch",
     "example": "node dist/example-usage.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -71,7 +72,8 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.10.5",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.1"
   },
   "dependencies": {
     "js-yaml": "^4.1.0"
