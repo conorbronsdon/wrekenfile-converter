@@ -1,4 +1,22 @@
+<div align="center">
+
 # Wrekenfile Converter
+
+Convert OpenAPI and Postman specs into execution-first Wrekenfiles for AI agents and LLM code generation.
+
+[![GitHub stars](https://img.shields.io/github/stars/conorbronsdon/wrekenfile-converter?style=flat-square)](https://github.com/conorbronsdon/wrekenfile-converter/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/wrekenfile-converter?style=flat-square)](https://www.npmjs.com/package/wrekenfile-converter)
+[![Tests](https://img.shields.io/badge/tests-123%20passing-brightgreen?style=flat-square)]()
+
+[![Wreken Spec](https://img.shields.io/badge/Wreken-v2.0.2-purple?style=flat-square)](https://wreken.com)
+[![Swytchcode](https://img.shields.io/badge/by-Swytchcode-orange?style=flat-square)](https://www.swytchcode.com/)
+
+[Demo](https://github.com/conorbronsdon/wrekenfile-demo) | [Wreken Spec](https://wreken.com) | [npm](https://www.npmjs.com/package/wrekenfile-converter) | [Issues](https://github.com/conorbronsdon/wrekenfile-converter/issues)
+
+</div>
+
+---
 
 A TypeScript/JavaScript library for converting OpenAPI specifications (v2 and v3) and Postman collections into **Wrekenfiles**, declarative YAML artifacts that act as the single source of truth for API methods, workflows, headers, and responses.
 Generated Wrekenfiles are compliant with the [**Wreken Specification v2.0.2**](./src/v2/wreken_specification_v_2_0%202.md) and support advanced mini-chunking for vector database storage and AI context management.
