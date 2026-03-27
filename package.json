@@ -4,6 +4,12 @@
   "description": "Convert OpenAPI and Postman specs into Wrekenfiles, with chunking for vector database storage",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "wrekenfile": "dist/v2/cli/cli-openapi-to-wrekenfile.js",
+    "wrekenfile-v2": "dist/v2/cli/cli-openapi-v2-to-wrekenfile.js",
+    "wrekenfile-postman": "dist/v2/cli/cli-postman-to-wrekenfile.js",
+    "wrekenfile-mini": "dist/v2/cli/cli-mini-wrekenfile-generator.js"
+  },
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
@@ -39,7 +45,8 @@
   "files": [
     "dist/**/*",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "specification/**/*"
   ],
   "exports": {
     ".": {
