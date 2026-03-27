@@ -4,7 +4,7 @@
 
 Convert OpenAPI and Postman specs into execution-first Wrekenfiles for AI agents and LLM code generation.
 
-[![GitHub stars](https://img.shields.io/github/stars/conorbronsdon/wrekenfile-converter?style=flat-square)](https://github.com/conorbronsdon/wrekenfile-converter/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/conorbronsdon/wrekenfile-converter?style=social)](https://github.com/conorbronsdon/wrekenfile-converter/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/wrekenfile-converter?style=flat-square)](https://www.npmjs.com/package/wrekenfile-converter)
 [![Tests](https://img.shields.io/badge/tests-123%20passing-brightgreen?style=flat-square)]()
