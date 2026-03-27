@@ -9,8 +9,7 @@ import {
   BASE_URL_VARIABLE_NAMES, 
   SENSITIVE_KEYS, 
   YAML_DUMP_OPTIONS,
-  EXECUTION_MODE_ASYNC,
-  ASYNC_RETURNS_RESULT,
+  EXECUTION_MODE_SYNC,
   TYPE_VOID,
   BODYTYPE_RAW,
   CONTENT_TYPE_JSON,
@@ -680,16 +679,7 @@ function extractOperations(collection: any, variables: Record<string, string>): 
       // EXECUTION section (mandatory) - v2.0.2 requires KIND
       methodDef.EXECUTION = {
         KIND: 'http',
-        MODE: EXECUTION_MODE_ASYNC, // HTTP methods default to async
-      };
-
-      // ASYNC section (required when MODE = async)
-      const resultType = returns.length > 0 ? returns[0].RETURNTYPE : TYPE_VOID;
-      methodDef.ASYNC = {
-        RETURNS: ASYNC_RETURNS_RESULT,
-        RESULT: {
-          TYPE: resultType,
-        },
+        MODE: EXECUTION_MODE_SYNC, // REST APIs are synchronous request/response
       };
 
       // INPUTS section (optional)

@@ -1,9 +1,9 @@
 # Wrekenfile Converter
 
-A comprehensive TypeScript/JavaScript library for converting OpenAPI specifications (v2 and v3) and Postman collections into **Wrekenfiles**, declarative YAML artifacts that act as the single source of truth for API methods, workflows, headers, and responses.
+A TypeScript/JavaScript library for converting OpenAPI specifications (v2 and v3) and Postman collections into **Wrekenfiles**, declarative YAML artifacts that act as the single source of truth for API methods, workflows, headers, and responses.
 Generated Wrekenfiles are compliant with the [**Wreken Specification v2.0.2**](./src/v2/wreken_specification_v_2_0%202.md) and support advanced mini-chunking for vector database storage and AI context management.
 
-
+**See a real-world example:** [wrekenfile-demo](https://github.com/conorbronsdon/wrekenfile-demo) — Podcast Index API (50 endpoints, 228 schemas) converted to a full Wrekenfile + 52 mini-wrekenfiles.
 
 ## Features
 
@@ -196,10 +196,8 @@ The CLI tools are available for both v1 and v2. The examples below use v2 (lates
 
 ### Convert OpenAPI v3 to Wrekenfile
 
-Generate a Wrekenfile YAML from an OpenAPI v3 (YAML or JSON) spec:
-
 ```bash
-npx ts-node src/v2/cli/cli-openapi-to-wrekenfile.ts --input <openapi.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]
+wrekenfile --input <openapi.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]
 ```
 
 **Options:**
@@ -209,15 +207,13 @@ npx ts-node src/v2/cli/cli-openapi-to-wrekenfile.ts --input <openapi.yaml|json> 
 
 **Example:**
 ```bash
-npx ts-node src/v2/cli/cli-openapi-to-wrekenfile.ts --input examples/3n.yaml --output 3n_wrekenfile_v2.yaml
+wrekenfile --input petstore.json --output petstore_wrekenfile.yaml
 ```
 
 ### Convert OpenAPI v2 (Swagger) to Wrekenfile
 
-Generate a Wrekenfile YAML from an OpenAPI v2/Swagger (YAML or JSON) spec:
-
 ```bash
-npx ts-node src/v2/cli/cli-openapi-v2-to-wrekenfile.ts --input <swagger.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]
+wrekenfile-v2 --input <swagger.yaml|json> [--output <wrekenfile.yaml>] [--cwd <dir>]
 ```
 
 **Options:**
@@ -227,25 +223,23 @@ npx ts-node src/v2/cli/cli-openapi-v2-to-wrekenfile.ts --input <swagger.yaml|jso
 
 **Example:**
 ```bash
-npx ts-node src/v2/cli/cli-openapi-v2-to-wrekenfile.ts --input examples/5n_v2.yaml --output 5n_v2_wrekenfile.yaml
+wrekenfile-v2 --input swagger.json --output api_wrekenfile.yaml
 ```
 
 ### Convert Postman Collection to Wrekenfile
 
-Convert a Postman collection JSON to a Wrekenfile YAML file:
-
 ```bash
-npx ts-node src/v2/cli/cli-postman-to-wrekenfile.ts <postman_collection.json> <output_wrekenfile.yaml> [postman_environment.json]
+wrekenfile-postman --input <postman_collection.json> [--output <wrekenfile.yaml>] [--env <environment.json>]
 ```
 
-**Arguments:**
-- `postman_collection.json`: Path to your Postman collection JSON file (required)
-- `output_wrekenfile.yaml`: Path to output Wrekenfile YAML (required)
-- `postman_environment.json`: Path to Postman environment file (optional)
+**Options:**
+- `--input` or `-i`: Path to your Postman collection JSON file (required)
+- `--output` or `-o`: Path to output Wrekenfile YAML (optional, defaults to `output_wrekenfile.yaml`)
+- `--env` or `-e`: Path to Postman environment file (optional)
 
 **Example:**
 ```bash
-npx ts-node src/v2/cli/cli-postman-to-wrekenfile.ts examples/Nium\ APIpostman_collection.json nium_wrekenfile_v2.yaml
+wrekenfile-postman --input collection.json --output api_wrekenfile.yaml --env environment.json
 ```
 
 ### Generate Mini Wrekenfiles
@@ -253,19 +247,19 @@ npx ts-node src/v2/cli/cli-postman-to-wrekenfile.ts examples/Nium\ APIpostman_co
 Generate standalone, execution-complete mini Wrekenfiles (one per method) from a main Wrekenfile YAML:
 
 ```bash
-npx ts-node src/v2/cli/cli-mini-wrekenfile-generator.ts --input <wrekenfile.yaml> [--output <dir>]
+wrekenfile-mini --input <wrekenfile.yaml> [--output <dir>]
 ```
 
 **Options:**
 - `--input` or `-i`: Path to your main Wrekenfile YAML (required)
-- `--output` or `-o`: Output directory for mini Wrekenfiles (optional, defaults to `./mini-wrekenfiles-v2`)
+- `--output` or `-o`: Output directory for mini Wrekenfiles (optional, defaults to `./mini-wrekenfiles`)
 
 **Example:**
 ```bash
-npx ts-node src/v2/cli/cli-mini-wrekenfile-generator.ts --input wrekenfile.yaml --output ./mini-wrekenfiles-v2
+wrekenfile-mini --input petstore_wrekenfile.yaml --output ./mini-wrekenfiles
 ```
 
-This will generate one standalone mini Wrekenfile per method in the specified output directory. Each mini-wrekenfile is execution-complete and includes all necessary details (HTTP, SDK, INPUTS with LOCATION, RETURNS, ERRORS, STRUCTS) for LLM code generation without external references.
+Each mini-wrekenfile is execution-complete and includes all necessary details (HTTP, SDK, INPUTS with LOCATION, RETURNS, ERRORS, STRUCTS) for LLM code generation without external references.
 
 ## API Reference
 

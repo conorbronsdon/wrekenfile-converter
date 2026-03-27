@@ -8,8 +8,7 @@ import {
   WREKENFILE_VERSION, 
   DEFAULT_BASE_URL, 
   YAML_DUMP_OPTIONS,
-  EXECUTION_MODE_ASYNC,
-  ASYNC_RETURNS_RESULT,
+  EXECUTION_MODE_SYNC,
   TYPE_VOID,
   TYPE_ANY,
   BODYTYPE_RAW,
@@ -834,16 +833,7 @@ function extractMethods(spec: any, baseDir: string): Record<string, any> {
       // EXECUTION section (mandatory) - v2.0.2 requires KIND
       methodDef.EXECUTION = {
         KIND: 'http',
-        MODE: EXECUTION_MODE_ASYNC, // HTTP methods default to async
-      };
-
-      // ASYNC section (required when MODE = async)
-      const resultType = returns.length > 0 ? returns[0].RETURNTYPE : TYPE_VOID;
-      methodDef.ASYNC = {
-        RETURNS: ASYNC_RETURNS_RESULT,
-        RESULT: {
-          TYPE: resultType,
-        },
+        MODE: EXECUTION_MODE_SYNC, // REST APIs are synchronous request/response
       };
 
       // INPUTS section (optional)
