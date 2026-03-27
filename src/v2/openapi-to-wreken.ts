@@ -313,7 +313,9 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
         }
         // Extract response schemas
         if (op.responses) {
-          for (const [code, response] of Object.entries<any>(op.responses)) {
+          for (const [code, rawResp] of Object.entries<any>(op.responses)) {
+            // Resolve $ref on the response object itself (e.g. $ref: '#/components/responses/...')
+            const response = rawResp?.$ref ? resolveRef(rawResp.$ref, spec, baseDir) : rawResp;
             if (response && response.content) {
               for (const [contentType, content] of Object.entries<any>(response.content)) {
                 if (content && content.schema) {
@@ -616,13 +618,16 @@ function extractResponses(op: any, operationId: string, method: string, path: st
 
   // Only include success responses (2xx) in RETURNS section
   // Error responses go in ERRORS section
-  for (const [code, response] of Object.entries<any>(op.responses || {})) {
+  for (const [code, rawResponse] of Object.entries<any>(op.responses || {})) {
     const statusCode = parseInt(code);
-    
+
     // Only process 2xx success responses
     if (statusCode < 200 || statusCode >= 300) {
       continue;
     }
+
+    // Resolve $ref on the response object itself (e.g. $ref: '#/components/responses/...')
+    const response = rawResponse.$ref ? resolveRef(rawResponse.$ref, spec, baseDir) : rawResponse;
 
     const content = response.content;
     let returnType: string | null = null;
@@ -708,11 +713,13 @@ function extractErrors(op: any, spec: any, baseDir: string): any[] {
   const errors: any[] = [];
 
   // Extract error responses (4xx, 5xx)
-  for (const [code, response] of Object.entries<any>(op.responses || {})) {
+  for (const [code, rawResponse] of Object.entries<any>(op.responses || {})) {
     const statusCode = parseInt(code);
     if (isNaN(statusCode) && code !== 'default') continue;
-    
+
     if (statusCode >= 400 || code === 'default') {
+      // Resolve $ref on the response object itself
+      const response = rawResponse.$ref ? resolveRef(rawResponse.$ref, spec, baseDir) : rawResponse;
       const content = response.content;
       let errorType = TYPE_ANY;
       let when = `HTTP ${code}`;
