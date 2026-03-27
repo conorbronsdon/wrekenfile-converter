@@ -367,6 +367,12 @@ dist/                               # Compiled JavaScript + types
 └── v2/
 ```
 
+## About
+
+The [Wreken specification](https://wreken.com) and wrekenfile-converter are created by [Swytchcode Technologies](https://www.swytchcode.com/). Wreken is an execution-first YAML spec for converting APIs into LLM-friendly tool definitions. Learn more at [wreken.com](https://wreken.com).
+
+This fork is maintained by [Conor Bronsdon](https://github.com/conorbronsdon) and includes CLI improvements, test coverage, and a [real-world demo](https://github.com/conorbronsdon/wrekenfile-demo) of the converter against the Podcast Index API.
+
 ## License
 
-MIT 
+MIT
