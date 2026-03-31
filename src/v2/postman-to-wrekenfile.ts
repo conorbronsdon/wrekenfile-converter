@@ -1,14 +1,12 @@
 // postman-to-wrekenfile.ts
 // Converts Postman collections to Wrekenfile v2.0.1 format
 import * as fs from 'fs';
-import * as path from 'path';
 import { generateYamlString } from './utils/yaml-utils';
 import { 
   WREKENFILE_VERSION, 
   DEFAULT_BASE_URL, 
   BASE_URL_VARIABLE_NAMES, 
   SENSITIVE_KEYS, 
-  YAML_DUMP_OPTIONS,
   EXECUTION_MODE_SYNC,
   TYPE_VOID,
   BODYTYPE_RAW,
@@ -16,7 +14,6 @@ import {
   CONTENT_TYPE_FORM_DATA,
   CONTENT_TYPE_URLENCODED,
   HEADER_CONTENT_TYPE,
-  HEADER_AUTHORIZATION,
   AUTH_BEARER_TOKEN,
   AUTH_API_KEY,
   AUTH_SIGNATURE,
@@ -279,7 +276,7 @@ function extractNestedStructs(obj: any, structs: Record<string, any[]>, basePref
   }
 }
 
-function extractPathFromUrl(url: any, variables: Record<string, string>): string {
+function extractPathFromUrl(url: any, _variables: Record<string, string>): string {
   if (url?.raw) {
     // Remove base URL and protocol
     let path = url.raw;
@@ -384,7 +381,7 @@ function getHeadersForOperation(request: any, variables: Record<string, string>)
   return headers;
 }
 
-function extractParameters(request: any, variables: Record<string, string>): any[] {
+function extractParameters(request: any, _variables: Record<string, string>): any[] {
   const inputParams: any[] = [];
   
   // v2.0.2: All parameters (path, query, header) must be in INPUTS with LOCATION
@@ -571,7 +568,7 @@ function extractResponses(item: any, itemName: string, method: string, path: str
   return returns;
 }
 
-function extractErrors(item: any, itemName: string, method: string, path: string): any[] {
+function extractErrors(item: any, _itemName: string, _method: string, _path: string): any[] {
   const errors: any[] = [];
   
   if (item.response) {
@@ -624,7 +621,6 @@ function extractOperations(collection: any, variables: Record<string, string>): 
       const url = item.request.url;
       const path = extractPathFromUrl(url, variables);
       const itemName = item.name || 'unknown';
-      const immediateParentName = parentName || null;
       // Generate operation ID (alias)
       let operationId = itemName.toLowerCase().replace(/[^a-z0-9]/g, '-');
       operationId = getUniqueOperationName(operationId);

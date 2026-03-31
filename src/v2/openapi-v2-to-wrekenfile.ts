@@ -5,14 +5,10 @@ import * as path from 'path';
 import { load } from 'js-yaml';
 import { generateYamlString } from './utils/yaml-utils';
 import { 
-  WREKENFILE_VERSION, 
-  DEFAULT_BASE_URL, 
-  YAML_DUMP_OPTIONS,
+  WREKENFILE_VERSION,
   EXECUTION_MODE_SYNC,
-  TYPE_VOID,
   TYPE_ANY,
   BODYTYPE_RAW,
-  DEFAULT_HTTP_SCHEME,
   CONTENT_TYPE_JSON,
   CONTENT_TYPE_FORM_DATA,
   CONTENT_TYPE_URLENCODED,
@@ -22,11 +18,10 @@ import {
   AUTH_BASIC_AUTH,
   AUTH_TEMPLATE_BEARER_ACCESS,
   AUTH_TEMPLATE_BASIC,
-  AUTH_TEMPLATE_ID_TOKEN,
   HTTP_METHODS_WITH_BODY,
 } from './utils/constants';
 import { generateReturnVarName, generateErrorWhen } from './utils/response-utils';
-import { mapOpenApiType, Primitive } from './utils/type-utils';
+import { mapOpenApiType } from './utils/type-utils';
 import { generateOpenApiSummary } from './utils/summary-utils';
 import { validateOpenApiV2Spec, validateBaseDir, logError, createConverterError } from './utils/error-utils';
 import { resolveCanonicalIds, computeCanonicalId, type MethodCanonicalInput } from './utils/canonical-id';
@@ -364,7 +359,7 @@ function getContentTypeAndBodyType(op: any, spec: any): { contentType: string; b
 
 function getAcceptContentType(op: any, spec: any): string {
   // Get the first content type from the first success response (2xx)
-  for (const [code, response] of Object.entries<any>(op.responses || {})) {
+  for (const [code, _response] of Object.entries<any>(op.responses || {})) {
     const statusCode = parseInt(code);
     if (statusCode >= 200 && statusCode < 300) {
       // OpenAPI v2 uses produces array
@@ -394,7 +389,7 @@ function getHeadersForOperation(op: any, spec: any, method?: string, baseDir?: s
   const security = op.security || spec.security || [];
   
   for (const securityRequirement of security) {
-    for (const [schemeName, scopes] of Object.entries(securityRequirement)) {
+    for (const [schemeName, _scopes] of Object.entries(securityRequirement)) {
       const scheme = spec.securityDefinitions?.[schemeName]; // OpenAPI v2 uses securityDefinitions
       if (scheme) {
         if (scheme.type === 'basic') {
@@ -731,12 +726,6 @@ function generateMethodAlias(operationId: string, method: string, path: string):
 }
 
 function extractMethods(spec: any, baseDir: string): Record<string, any> {
-  // OpenAPI v2 constructs base URL from schemes, host, and basePath
-  const scheme = spec.schemes?.[0] || DEFAULT_HTTP_SCHEME;
-  const host = spec.host || '';
-  const basePath = spec.basePath || '';
-  const base = `${scheme}://${host}${basePath}`;
-  
   const methods: Record<string, any> = {};
   
   // Valid HTTP methods
@@ -840,7 +829,7 @@ function extractSecurityDefaults(spec: any): Record<string, string> {
   const defs: Record<string, string> = {};
   const securityDefinitions = spec.securityDefinitions || {}; // OpenAPI v2 uses securityDefinitions
   
-  for (const [name, scheme] of Object.entries<any>(securityDefinitions)) {
+  for (const [_name, scheme] of Object.entries<any>(securityDefinitions)) {
     if (scheme && typeof scheme === 'object' && scheme.type === 'basic') {
       defs.basic_auth = AUTH_TEMPLATE_BASIC;
     } else if (scheme && typeof scheme === 'object' && scheme.type === 'apiKey') {

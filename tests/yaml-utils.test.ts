@@ -105,6 +105,28 @@ describe('removeUndefinedValues', () => {
     expect(removeUndefinedValues('hello')).toBe('hello');
     expect(removeUndefinedValues(true)).toBe(true);
   });
+
+  it('preserves falsy values (0, false, empty string)', () => {
+    const result = removeUndefinedValues({ a: 0, b: false, c: '', d: null });
+    expect(result).toEqual({ a: 0, b: false, c: '' });
+  });
+
+  it('preserves falsy values in arrays', () => {
+    const result = removeUndefinedValues([0, false, '', null, undefined, 1]);
+    expect(result).toEqual([0, false, '', 1]);
+  });
+
+  it('handles deeply nested objects', () => {
+    const result = removeUndefinedValues({
+      a: { b: { c: { d: undefined, e: 'deep' } } },
+    });
+    expect(result).toEqual({ a: { b: { c: { e: 'deep' } } } });
+  });
+
+  it('handles empty objects and arrays', () => {
+    expect(removeUndefinedValues({})).toEqual({});
+    expect(removeUndefinedValues([])).toEqual([]);
+  });
 });
 
 describe('removeTypeQuotes', () => {

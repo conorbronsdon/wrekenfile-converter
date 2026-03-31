@@ -38,4 +38,42 @@ describe('generateErrorWhen', () => {
     const result = generateErrorWhen(null, '301');
     expect(result).toBe('HTTP 301');
   });
+
+  it('handles undefined response', () => {
+    const result = generateErrorWhen(undefined, '404');
+    expect(result).toContain('404');
+  });
+
+  it('handles response with empty description', () => {
+    const result = generateErrorWhen({ description: '' }, '400');
+    expect(result).toContain('Client error');
+  });
+
+  it('handles all 5xx codes', () => {
+    expect(generateErrorWhen(null, '502')).toContain('Server error');
+    expect(generateErrorWhen(null, '503')).toContain('Server error');
+    expect(generateErrorWhen(null, '504')).toContain('Server error');
+  });
+});
+
+describe('generateReturnVarName edge cases', () => {
+  it('handles single-word operationId', () => {
+    const result = generateReturnVarName('list', '200');
+    expect(result).toBe('list_result');
+  });
+
+  it('handles operationId with consecutive capitals', () => {
+    const result = generateReturnVarName('getAPIKeys', '200');
+    expect(result).toContain('_result');
+  });
+
+  it('handles 202 accepted status', () => {
+    const result = generateReturnVarName('deleteUser', '202');
+    expect(result).toBe('delete_user_202');
+  });
+
+  it('handles 204 no content status', () => {
+    const result = generateReturnVarName('deleteUser', '204');
+    expect(result).toBe('delete_user_204');
+  });
 });
