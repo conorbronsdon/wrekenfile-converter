@@ -5,11 +5,9 @@ import * as path from 'path';
 import { load } from 'js-yaml';
 import { generateYamlString } from './utils/yaml-utils';
 import { 
-  WREKENFILE_VERSION, 
-  DEFAULT_BASE_URL, 
-  YAML_DUMP_OPTIONS,
+  WREKENFILE_VERSION,
+  DEFAULT_BASE_URL,
   EXECUTION_MODE_SYNC,
-  TYPE_VOID,
   TYPE_ANY,
   BODYTYPE_RAW,
   CONTENT_TYPE_JSON,
@@ -29,7 +27,7 @@ import {
   HTTP_METHODS_WITH_BODY,
 } from './utils/constants';
 import { generateReturnVarName, generateErrorWhen } from './utils/response-utils';
-import { mapOpenApiType, Primitive } from './utils/type-utils';
+import { mapOpenApiType } from './utils/type-utils';
 import { generateOpenApiSummary } from './utils/summary-utils';
 import { validateOpenApiV3Spec, validateBaseDir, logError, createConverterError } from './utils/error-utils';
 import { resolveCanonicalIds, computeCanonicalId, type MethodCanonicalInput } from './utils/canonical-id';
@@ -299,7 +297,7 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
         const operationId = op.operationId || `${method}-${pathStr.replace(/[\/{}]/g, '-')}`;
         // Extract request body schemas
         if (op.requestBody?.content) {
-          for (const [contentType, content] of Object.entries<any>(op.requestBody.content)) {
+          for (const [_contentType, content] of Object.entries<any>(op.requestBody.content)) {
             if (content && content.schema) {
               if (content.schema && content.schema.$ref) {
                 const refName = content.schema.$ref.split('/').pop();
@@ -317,7 +315,7 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
             // Resolve $ref on the response object itself (e.g. $ref: '#/components/responses/...')
             const response = rawResp?.$ref ? resolveRef(rawResp.$ref, spec, baseDir) : rawResp;
             if (response && response.content) {
-              for (const [contentType, content] of Object.entries<any>(response.content)) {
+              for (const [_contentType, content] of Object.entries<any>(response.content)) {
                 if (content && content.schema) {
                   const schema = content.schema;
                   if (schema.$ref) {
@@ -400,7 +398,7 @@ function getHeadersForOperation(op: any, spec: any, method?: string, baseDir?: s
   const security = op.security || spec.security || [];
   
   for (const securityRequirement of security) {
-    for (const [schemeName, scopes] of Object.entries(securityRequirement)) {
+    for (const [schemeName, _scopes] of Object.entries(securityRequirement)) {
       const scheme = spec.components?.securitySchemes?.[schemeName];
       if (scheme) {
         if (scheme.type === 'http') {
@@ -765,7 +763,6 @@ function generateMethodAlias(operationId: string, method: string, path: string):
 }
 
 function extractMethods(spec: any, baseDir: string): Record<string, any> {
-  const base = spec.servers?.[0]?.url || '';
   const methods: Record<string, any> = {};
   
   // Valid HTTP methods
@@ -868,7 +865,7 @@ function extractSecurityDefaults(spec: any): Record<string, string> {
   const defs: Record<string, string> = {};
   const securitySchemes = spec.components?.securitySchemes || {};
   
-  for (const [name, scheme] of Object.entries<any>(securitySchemes)) {
+  for (const [_name, scheme] of Object.entries<any>(securitySchemes)) {
     if (scheme.type === 'http') {
       if (scheme.scheme === 'bearer') {
         defs.bearer_token = AUTH_TEMPLATE_BEARER;
@@ -997,7 +994,7 @@ function generateWrekenfile(spec: any, baseDir: string): string {
     });
     
     // Re-throw with additional context if it's not already a ConverterError
-    if (err.code && err.code.startsWith('INVALID_') || err.code?.startsWith('MISSING_')) {
+    if (err.code && (err.code.startsWith('INVALID_') || err.code.startsWith('MISSING_'))) {
       throw err;
     }
     

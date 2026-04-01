@@ -84,6 +84,42 @@ describe('computeCanonicalId', () => {
     const id = computeCanonicalId('', '/pets');
     expect(id).toBe('pets.pet.list');
   });
+
+  it('handles OPTIONS method', () => {
+    const id = computeCanonicalId('OPTIONS', '/pets');
+    expect(id).toBeDefined();
+    expect(typeof id).toBe('string');
+    expect(id.split('.').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('handles HEAD method', () => {
+    const id = computeCanonicalId('HEAD', '/pets/{petId}');
+    expect(id).toBeDefined();
+    expect(typeof id).toBe('string');
+  });
+
+  it('handles triple-nested resources', () => {
+    const id = computeCanonicalId('GET', '/orgs/{orgId}/teams/{teamId}/members/{memberId}');
+    expect(id).toBeDefined();
+    expect(id.split('.').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('handles paths with numeric version segments', () => {
+    const id = computeCanonicalId('GET', '/v2/users/{id}/settings');
+    expect(id).not.toContain('v2');
+  });
+
+  it('handles single-segment paths', () => {
+    const id = computeCanonicalId('GET', '/health');
+    expect(id).toBeDefined();
+    expect(typeof id).toBe('string');
+  });
+
+  it('handles paths with trailing slash', () => {
+    const withSlash = computeCanonicalId('GET', '/pets/');
+    const withoutSlash = computeCanonicalId('GET', '/pets');
+    expect(withSlash).toBe(withoutSlash);
+  });
 });
 
 describe('resolveCanonicalIds', () => {

@@ -112,4 +112,70 @@ describe('filterStructsByUsage', () => {
   it('handles null input gracefully', () => {
     expect(() => filterStructsByUsage(null)).not.toThrow();
   });
+
+  it('handles map type struct references', () => {
+    const wrekenfile = {
+      METHODS: {
+        getConfig: {
+          RETURNS: [{ RETURNTYPE: 'map[STRING]STRUCT(ConfigValue)' }],
+        },
+      },
+      STRUCTS: {
+        ConfigValue: [{ NAME: 'value', TYPE: 'STRING' }],
+        Unused: [{ NAME: 'x', TYPE: 'INT' }],
+      },
+    };
+
+    filterStructsByUsage(wrekenfile);
+    expect(wrekenfile.STRUCTS).toHaveProperty('ConfigValue');
+    expect(wrekenfile.STRUCTS).not.toHaveProperty('Unused');
+  });
+
+  it('keeps deeply transitive struct chains', () => {
+    const wrekenfile = {
+      METHODS: {
+        getOrder: {
+          RETURNS: [{ RETURNTYPE: 'STRUCT(Order)' }],
+        },
+      },
+      STRUCTS: {
+        Order: [{ NAME: 'items', TYPE: '[]STRUCT(OrderItem)' }],
+        OrderItem: [{ NAME: 'product', TYPE: 'STRUCT(Product)' }],
+        Product: [{ NAME: 'name', TYPE: 'STRING' }],
+        Unrelated: [{ NAME: 'x', TYPE: 'INT' }],
+      },
+    };
+
+    filterStructsByUsage(wrekenfile);
+    expect(wrekenfile.STRUCTS).toHaveProperty('Order');
+    expect(wrekenfile.STRUCTS).toHaveProperty('OrderItem');
+    expect(wrekenfile.STRUCTS).toHaveProperty('Product');
+    expect(wrekenfile.STRUCTS).not.toHaveProperty('Unrelated');
+  });
+
+  it('handles methods with no INPUTS, RETURNS, or ERRORS', () => {
+    const wrekenfile = {
+      METHODS: {
+        healthCheck: { SUMMARY: 'Health check' },
+      },
+      STRUCTS: {
+        SomeStruct: [{ NAME: 'x', TYPE: 'INT' }],
+      },
+    };
+
+    filterStructsByUsage(wrekenfile);
+    expect(wrekenfile.STRUCTS).not.toHaveProperty('SomeStruct');
+  });
+
+  it('handles empty METHODS object', () => {
+    const wrekenfile = {
+      METHODS: {},
+      STRUCTS: {
+        SomeStruct: [{ NAME: 'x', TYPE: 'INT' }],
+      },
+    };
+
+    filterStructsByUsage(wrekenfile);
+    expect(Object.keys(wrekenfile.STRUCTS)).toHaveLength(0);
+  });
 });

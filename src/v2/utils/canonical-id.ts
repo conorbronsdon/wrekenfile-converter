@@ -28,9 +28,6 @@ const STANDARD_VERBS = new Set([
   'migrate',
 ]);
 
-/** Verb-first form for compound actions (kebab segment → camelCase with verb first) */
-const VERB_PREFIXES = ['remove', 'install', 'execute', 'upload', 'download', 'retry', 'connect'];
-
 /** Irregular plural → singular */
 const IRREGULAR_SINGULAR: Record<string, string> = {
   policies: 'policy',
@@ -93,28 +90,6 @@ function toCamelCase(segment: string): string {
 }
 
 /**
- * For an action-related segment:
- * - If it ends with "-<verb>", move verb to front: "helm-release-remove" -> "removeHelmRelease"
- * - If it's a single noun (e.g. "shell"), produce "executeShell"
- * - Otherwise, just kebab/snake -> camelCase
- */
-function actionSegmentToCamel(segment: string): string {
-  const lower = segment.toLowerCase();
-  for (const verb of VERB_PREFIXES) {
-    if (lower.endsWith('-' + verb)) {
-      const rest = segment.slice(0, -(verb.length + 1));
-      return verb + toCamelCase(rest).replace(/^(.)/, (_, c) => c.toUpperCase());
-    }
-  }
-  const camel = toCamelCase(segment);
-  // Single-word noun (e.g. "shell") -> executeShell when not a standard verb
-  if (!segment.includes('-') && !segment.includes('_') && !STANDARD_VERBS.has(lower)) {
-    return 'execute' + camel.charAt(0).toUpperCase() + camel.slice(1);
-  }
-  return camel;
-}
-
-/**
  * Extract the primary verb for a method from remaining path segments and HTTP method.
  * SINGLE VERB RULE: only one verb is allowed; we keep the first one we find.
  */
@@ -168,7 +143,7 @@ function extractPrimaryVerb(
  * Extract at most ONE subresource from remaining segments, based on nouns before the verb.
  * We pick the last meaningful noun before the verb (most specific).
  */
-function extractSubresource(remaining: string[], verb: string): string | null {
+function extractSubresource(remaining: string[], _verb: string): string | null {
   if (remaining.length === 0) return null;
 
   // Find index of the verb in remaining segments (if present)

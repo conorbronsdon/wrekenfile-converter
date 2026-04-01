@@ -7,7 +7,7 @@ Convert OpenAPI and Postman specs into execution-first Wrekenfiles for AI agents
 [![GitHub stars](https://img.shields.io/github/stars/conorbronsdon/wrekenfile-converter?style=social)](https://github.com/conorbronsdon/wrekenfile-converter/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/wrekenfile-converter?style=flat-square)](https://www.npmjs.com/package/wrekenfile-converter)
-[![Tests](https://img.shields.io/badge/tests-123%20passing-brightgreen?style=flat-square)]()
+[![CI](https://github.com/conorbronsdon/wrekenfile-converter/actions/workflows/ci.yml/badge.svg)](https://github.com/conorbronsdon/wrekenfile-converter/actions/workflows/ci.yml)
 
 [![Wreken Spec](https://img.shields.io/badge/Wreken-v2.0.2-purple?style=flat-square)](https://wreken.com)
 [![Swytchcode](https://img.shields.io/badge/by-Swytchcode-orange?style=flat-square)](https://www.swytchcode.com/)
@@ -373,10 +373,15 @@ src/
     ├── openapi-v2-to-wrekenfile.ts
     ├── postman-to-wrekenfile.ts
     ├── mini-wrekenfile-generator.ts
-    ├── unified_mini_wrekenfile_spec_v_2.md  # Mini-wrekenfile specification
     ├── utils/                      # Utility functions
-    │   ├── yaml-utils.ts          # YAML processing utilities
-    │   └── error-utils.ts         # Error handling utilities
+    │   ├── canonical-id.ts        # Deterministic canonical ID generation
+    │   ├── constants.ts           # Shared constants (auth, headers, types)
+    │   ├── error-utils.ts         # Error handling and spec validation
+    │   ├── response-utils.ts      # RETURNVAR and error message generation
+    │   ├── struct-utils.ts        # Struct filtering by usage
+    │   ├── summary-utils.ts       # Operation summary generation
+    │   ├── type-utils.ts          # OpenAPI → Wrekenfile type mapping
+    │   └── yaml-utils.ts          # YAML generation and validation pipeline
     └── cli/                        # CLI tools for v2
 
 dist/                               # Compiled JavaScript + types

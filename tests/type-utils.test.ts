@@ -61,4 +61,33 @@ describe('mapOpenApiType', () => {
     expect(mapOpenApiType('INTEGER')).toBe('INT');
     expect(mapOpenApiType('Boolean')).toBe('BOOL');
   });
+
+  it('maps int shorthand', () => {
+    expect(mapOpenApiType('int')).toBe('INT');
+  });
+
+  it('maps bool shorthand', () => {
+    expect(mapOpenApiType('bool')).toBe('BOOL');
+  });
+
+  it('handles empty string type', () => {
+    expect(mapOpenApiType('')).toBe('ANY');
+  });
+
+  it('handles null type input', () => {
+    expect(mapOpenApiType(null)).toBe('ANY');
+  });
+
+  it('handles number with no format', () => {
+    expect(mapOpenApiType('number')).toBe('FLOAT');
+  });
+
+  it('prioritizes format over type for date-time', () => {
+    expect(mapOpenApiType('string', 'date-time')).toBe('TIMESTAMP');
+    expect(mapOpenApiType('string', 'date')).toBe('DATE');
+  });
+
+  it('handles single-element nullable array', () => {
+    expect(mapOpenApiType(['string'])).toBe('STRING');
+  });
 });
