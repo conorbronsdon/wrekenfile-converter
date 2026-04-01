@@ -121,7 +121,7 @@ export function removeUndefinedValues(obj: any): any {
   if (Array.isArray(obj)) {
     return obj
       .map(item => removeUndefinedValues(item))
-      .filter(item => item !== undefined && item !== null);
+      .filter(item => item !== undefined);
   }
   
   if (typeof obj === 'object') {
