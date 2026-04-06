@@ -22,16 +22,14 @@ describe('generateErrorWhen', () => {
     expect(result).toBe('Not found (HTTP 404)');
   });
 
-  it('generates client error message for 4xx', () => {
+  it('uses well-known HTTP status description for known codes', () => {
     const result = generateErrorWhen(null, '403');
-    expect(result).toContain('Client error');
-    expect(result).toContain('403');
+    expect(result).toBe('Forbidden (HTTP 403)');
   });
 
-  it('generates server error message for 5xx', () => {
+  it('uses well-known description for 500', () => {
     const result = generateErrorWhen(null, '500');
-    expect(result).toContain('Server error');
-    expect(result).toContain('500');
+    expect(result).toBe('Internal Server Error (HTTP 500)');
   });
 
   it('falls back to HTTP code for other statuses', () => {
@@ -39,20 +37,25 @@ describe('generateErrorWhen', () => {
     expect(result).toBe('HTTP 301');
   });
 
-  it('handles undefined response', () => {
+  it('handles undefined response with known code', () => {
     const result = generateErrorWhen(undefined, '404');
-    expect(result).toContain('404');
+    expect(result).toBe('Not Found (HTTP 404)');
   });
 
-  it('handles response with empty description', () => {
+  it('handles response with empty description using known status', () => {
     const result = generateErrorWhen({ description: '' }, '400');
-    expect(result).toContain('Client error');
+    expect(result).toBe('Bad Request (HTTP 400)');
   });
 
-  it('handles all 5xx codes', () => {
-    expect(generateErrorWhen(null, '502')).toContain('Server error');
-    expect(generateErrorWhen(null, '503')).toContain('Server error');
-    expect(generateErrorWhen(null, '504')).toContain('Server error');
+  it('uses well-known descriptions for common 5xx codes', () => {
+    expect(generateErrorWhen(null, '502')).toBe('Bad Gateway (HTTP 502)');
+    expect(generateErrorWhen(null, '503')).toBe('Service Unavailable (HTTP 503)');
+    expect(generateErrorWhen(null, '504')).toBe('Gateway Timeout (HTTP 504)');
+  });
+
+  it('falls back to generic for unknown status codes', () => {
+    expect(generateErrorWhen(null, '418')).toBe('Client error (HTTP 418)');
+    expect(generateErrorWhen(null, '599')).toBe('Server error (HTTP 599)');
   });
 });
 
