@@ -73,9 +73,14 @@ export function computeConversionStats(
       methodsWithErrors++;
     }
 
-    // Auth
+    // Auth (case-insensitive header match — Wrekenfile headers can be emitted
+    // in any case by user-edited files or other converters)
     const headers = methodData.HTTP?.HEADERS || {};
-    if (headers.Authorization || headers['X-API-Key'] || headers['x-api-key']) {
+    const normalizedHeaderKeys = Object.keys(headers).map((k) => k.toLowerCase());
+    if (
+      normalizedHeaderKeys.includes('authorization') ||
+      normalizedHeaderKeys.includes('x-api-key')
+    ) {
       methodsWithAuth++;
     }
 

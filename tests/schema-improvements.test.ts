@@ -36,15 +36,43 @@ describe('oneOf/anyOf handling', () => {
   });
 
   it('creates union struct with primitive type variants (anyOf)', () => {
-    const result = generateWrekenfile(spec, FIXTURES_DIR);
+    // Reference MixedType from an operation so filterStructsByUsage doesn't prune it
+    const specWithMixedTypeReference = {
+      ...spec,
+      paths: {
+        ...spec.paths,
+        '/mixed-type-test': {
+          get: {
+            operationId: 'getMixedType',
+            responses: {
+              '200': {
+                description: 'MixedType response',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/MixedType' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const result = generateWrekenfile(specWithMixedTypeReference, FIXTURES_DIR);
     const parsed = yamlLoad(result) as any;
 
-    // MixedType uses anyOf with string and integer
-    const mixedUnion = parsed.STRUCTS?.MixedType_Union;
-    // MixedType_Union may be pruned if not referenced by any method
-    // But the union struct generation itself should work
-    // Let's verify at the schema level by checking PetInput_Union variants exist
-    expect(parsed.STRUCTS).toBeDefined();
+    // MixedType uses anyOf with string and integer — variants are on MixedType directly
+    const mixedType = parsed.STRUCTS?.MixedType;
+    expect(mixedType).toBeDefined();
+
+    const stringVariant = mixedType.find((f: any) => f.name === 'variant_0');
+    expect(stringVariant).toBeDefined();
+    expect(stringVariant.type).toBe('STRING');
+
+    const integerVariant = mixedType.find((f: any) => f.name === 'variant_1');
+    expect(integerVariant).toBeDefined();
+    expect(integerVariant.type).toBe('INT');
   });
 
   it('includes Cat and Dog structs referenced by union variants', () => {

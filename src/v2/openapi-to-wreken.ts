@@ -184,14 +184,15 @@ function parseSchema(name: string, schema: any, spec: any, baseDir: string, dept
     }
     for (let i = 0; i < variants.length; i++) {
       const variant = variants[i];
-      if (variant.$ref) {
-        const refName = variant.$ref.split('/').pop();
+      if (variant && typeof variant === 'object' && variant.$ref) {
+        const refName = typeof variant.$ref === 'string' ? variant.$ref.split('/').pop() : undefined;
+        const variantType = getTypeFromSchema(variant, spec, baseDir) || 'ANY';
         fields.push({
-          name: `variant_${refName || i}`,
-          type: `STRUCT(${refName})`,
+          name: refName ? `variant_${refName}` : `variant_${i}`,
+          type: variantType,
           REQUIRED: false,
         });
-      } else if (variant.type && variant.type !== 'object') {
+      } else if (variant && typeof variant === 'object' && variant.type && variant.type !== 'object') {
         fields.push({
           name: `variant_${i}`,
           type: mapType(variant.type, variant.format),
@@ -1054,49 +1055,74 @@ function generateWrekenfile(spec: any, baseDir: string): string {
  * Use this when you need visibility into what was converted and potential issues.
  */
 function generateWrekenfileWithStats(spec: any, baseDir: string): { yaml: string; stats: ConversionStats } {
-  // Validate inputs
-  validateOpenApiV3Spec(spec);
-  validateBaseDir(baseDir);
+  try {
+    // Validate inputs
+    validateOpenApiV3Spec(spec);
+    validateBaseDir(baseDir);
 
-  const defaults = extractSecurityDefaults(spec);
-  const methods = extractMethods(spec, baseDir);
-  const structs = extractStructs(spec, baseDir);
+    const defaults = extractSecurityDefaults(spec);
+    const methods = extractMethods(spec, baseDir);
+    const structs = extractStructs(spec, baseDir);
 
-  // Resolve canonical IDs
-  const canonicalInputs: MethodCanonicalInput[] = Object.entries(methods).map(
-    ([methodId, methodData]) => ({
-      methodId,
-      httpMethod: methodData.HTTP?.METHOD,
-      endpoint: methodData.HTTP?.ENDPOINT,
-      existingCanonicalId: methodData.CANONICAL_ID,
-    })
-  );
-  const canonicalIdMap = resolveCanonicalIds(canonicalInputs);
-  for (const [methodId, methodData] of Object.entries(methods)) {
-    const canonicalId = canonicalIdMap.get(methodId);
-    if (canonicalId) {
-      methodData.CANONICAL_ID = canonicalId;
+    // Resolve canonical IDs
+    const canonicalInputs: MethodCanonicalInput[] = Object.entries(methods).map(
+      ([methodId, methodData]) => ({
+        methodId,
+        httpMethod: methodData.HTTP?.METHOD,
+        endpoint: methodData.HTTP?.ENDPOINT,
+        existingCanonicalId: methodData.CANONICAL_ID,
+      })
+    );
+    const canonicalIdMap = resolveCanonicalIds(canonicalInputs);
+    for (const [methodId, methodData] of Object.entries(methods)) {
+      const canonicalId = canonicalIdMap.get(methodId);
+      if (canonicalId) {
+        methodData.CANONICAL_ID = canonicalId;
+      }
     }
+    updateReturnVarsUsingCanonicalId(methods);
+
+    const wrekenfile: any = { VERSION: WREKENFILE_VERSION };
+    if (Object.keys(defaults).length > 0) {
+      wrekenfile.DEFAULTS = defaults;
+    }
+    const renamedMethods = renameMethodsToCanonicalId(methods);
+    wrekenfile.METHODS = renamedMethods;
+
+    const preFilterStructCount = Object.keys(structs).length;
+    if (preFilterStructCount > 0) {
+      wrekenfile.STRUCTS = structs;
+    }
+    filterStructsByUsage(wrekenfile);
+
+    const stats = computeConversionStats(wrekenfile, preFilterStructCount);
+    const yaml = generateYamlString(wrekenfile);
+
+    return { yaml, stats };
+  } catch (err: any) {
+    logError(err, {
+      converter: 'openapi-to-wreken',
+      baseDir,
+      specInfo: spec?.info?.title || 'unknown',
+      specVersion: spec?.openapi || 'unknown'
+    });
+
+    if (err.code && (err.code.startsWith('INVALID_') || err.code.startsWith('MISSING_'))) {
+      throw err;
+    }
+
+    throw createConverterError(
+      `Failed to generate Wrekenfile from OpenAPI v3 spec: ${err.message}`,
+      "GENERATION_FAILED",
+      {
+        converter: 'openapi-to-wreken',
+        baseDir,
+        specInfo: spec?.info?.title || 'unknown',
+        specVersion: spec?.openapi || 'unknown'
+      },
+      err
+    );
   }
-  updateReturnVarsUsingCanonicalId(methods);
-
-  const wrekenfile: any = { VERSION: WREKENFILE_VERSION };
-  if (Object.keys(defaults).length > 0) {
-    wrekenfile.DEFAULTS = defaults;
-  }
-  const renamedMethods = renameMethodsToCanonicalId(methods);
-  wrekenfile.METHODS = renamedMethods;
-
-  const preFilterStructCount = Object.keys(structs).length;
-  if (preFilterStructCount > 0) {
-    wrekenfile.STRUCTS = structs;
-  }
-  filterStructsByUsage(wrekenfile);
-
-  const stats = computeConversionStats(wrekenfile, preFilterStructCount);
-  const yaml = generateYamlString(wrekenfile);
-
-  return { yaml, stats };
 }
 
 // Export for programmatic use
