@@ -32,6 +32,7 @@ import { generateOpenApiSummary } from './utils/summary-utils';
 import { validateOpenApiV3Spec, validateBaseDir, logError, createConverterError } from './utils/error-utils';
 import { resolveCanonicalIds, computeCanonicalId, type MethodCanonicalInput } from './utils/canonical-id';
 import { filterStructsByUsage } from './utils/struct-utils';
+import { computeConversionStats, type ConversionStats } from './utils/conversion-stats';
 
 const externalRefCache: Record<string, any> = {};
 
@@ -170,11 +171,45 @@ function parseSchema(name: string, schema: any, spec: any, baseDir: string, dept
   if (schema.$ref) return parseSchema(name, resolveRef(schema.$ref, spec, baseDir), spec, baseDir, depth + 1);
   if (schema.allOf) return schema.allOf.flatMap((s: any) => parseSchema(name, s, spec, baseDir, depth + 1));
   if (schema.oneOf || schema.anyOf) {
-    // For unions, create a simple struct
-    return [{
-      name: 'variant',
-      type: `STRUCT(${name}_Union)`,
-      REQUIRED: false
+    // Enumerate union variants with their actual types
+    const variants = schema.oneOf || schema.anyOf;
+    const fields: any[] = [];
+    // Add discriminator field if present
+    if (schema.discriminator?.propertyName) {
+      fields.push({
+        name: schema.discriminator.propertyName,
+        type: 'STRING',
+        REQUIRED: true,
+      });
+    }
+    for (let i = 0; i < variants.length; i++) {
+      const variant = variants[i];
+      if (variant && typeof variant === 'object' && variant.$ref) {
+        const refName = typeof variant.$ref === 'string' ? variant.$ref.split('/').pop() : undefined;
+        const variantType = getTypeFromSchema(variant, spec, baseDir) || 'ANY';
+        fields.push({
+          name: refName ? `variant_${refName}` : `variant_${i}`,
+          type: variantType,
+          REQUIRED: false,
+        });
+      } else if (variant && typeof variant === 'object' && variant.type && variant.type !== 'object') {
+        fields.push({
+          name: `variant_${i}`,
+          type: mapType(variant.type, variant.format),
+          REQUIRED: false,
+        });
+      } else {
+        fields.push({
+          name: `variant_${i}`,
+          type: 'ANY',
+          REQUIRED: false,
+        });
+      }
+    }
+    return fields.length > 0 ? fields : [{
+      name: 'value',
+      type: 'ANY',
+      REQUIRED: false,
     }];
   }
 
@@ -286,7 +321,9 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
     collectAllReferencedSchemas(schemas[name], name);
     const schema = schemas[name];
     if (schema && (schema.oneOf || schema.anyOf)) {
-      structs[`${name}_Union`] = [{ name: 'value', type: 'ANY', REQUIRED: false }];
+      // Build union struct with actual variant types
+      const unionFields = parseSchema(`${name}_Union`, schema, spec, baseDir);
+      structs[`${name}_Union`] = unionFields.length > 0 ? unionFields : [{ name: 'value', type: 'ANY', REQUIRED: false }];
     }
   }
   
@@ -975,7 +1012,8 @@ function generateWrekenfile(spec: any, baseDir: string): string {
   wrekenfile.METHODS = renamedMethods;
 
   // Add STRUCTS if we have any
-  if (Object.keys(structs).length > 0) {
+  const preFilterStructCount = Object.keys(structs).length;
+  if (preFilterStructCount > 0) {
     wrekenfile.STRUCTS = structs;
   }
 
@@ -1012,6 +1050,81 @@ function generateWrekenfile(spec: any, baseDir: string): string {
   }
 }
 
+/**
+ * Generate a Wrekenfile and return both the YAML string and conversion stats.
+ * Use this when you need visibility into what was converted and potential issues.
+ */
+function generateWrekenfileWithStats(spec: any, baseDir: string): { yaml: string; stats: ConversionStats } {
+  try {
+    // Validate inputs
+    validateOpenApiV3Spec(spec);
+    validateBaseDir(baseDir);
+
+    const defaults = extractSecurityDefaults(spec);
+    const methods = extractMethods(spec, baseDir);
+    const structs = extractStructs(spec, baseDir);
+
+    // Resolve canonical IDs
+    const canonicalInputs: MethodCanonicalInput[] = Object.entries(methods).map(
+      ([methodId, methodData]) => ({
+        methodId,
+        httpMethod: methodData.HTTP?.METHOD,
+        endpoint: methodData.HTTP?.ENDPOINT,
+        existingCanonicalId: methodData.CANONICAL_ID,
+      })
+    );
+    const canonicalIdMap = resolveCanonicalIds(canonicalInputs);
+    for (const [methodId, methodData] of Object.entries(methods)) {
+      const canonicalId = canonicalIdMap.get(methodId);
+      if (canonicalId) {
+        methodData.CANONICAL_ID = canonicalId;
+      }
+    }
+    updateReturnVarsUsingCanonicalId(methods);
+
+    const wrekenfile: any = { VERSION: WREKENFILE_VERSION };
+    if (Object.keys(defaults).length > 0) {
+      wrekenfile.DEFAULTS = defaults;
+    }
+    const renamedMethods = renameMethodsToCanonicalId(methods);
+    wrekenfile.METHODS = renamedMethods;
+
+    const preFilterStructCount = Object.keys(structs).length;
+    if (preFilterStructCount > 0) {
+      wrekenfile.STRUCTS = structs;
+    }
+    filterStructsByUsage(wrekenfile);
+
+    const stats = computeConversionStats(wrekenfile, preFilterStructCount);
+    const yaml = generateYamlString(wrekenfile);
+
+    return { yaml, stats };
+  } catch (err: any) {
+    logError(err, {
+      converter: 'openapi-to-wreken',
+      baseDir,
+      specInfo: spec?.info?.title || 'unknown',
+      specVersion: spec?.openapi || 'unknown'
+    });
+
+    if (err.code && (err.code.startsWith('INVALID_') || err.code.startsWith('MISSING_'))) {
+      throw err;
+    }
+
+    throw createConverterError(
+      `Failed to generate Wrekenfile from OpenAPI v3 spec: ${err.message}`,
+      "GENERATION_FAILED",
+      {
+        converter: 'openapi-to-wreken',
+        baseDir,
+        specInfo: spec?.info?.title || 'unknown',
+        specVersion: spec?.openapi || 'unknown'
+      },
+      err
+    );
+  }
+}
+
 // Export for programmatic use
-export { generateWrekenfile };
+export { generateWrekenfile, generateWrekenfileWithStats };
 
