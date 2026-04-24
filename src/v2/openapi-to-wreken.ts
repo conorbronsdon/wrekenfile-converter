@@ -118,41 +118,6 @@ function resolveRef(ref: string, spec: any, baseDir: string): any {
   }
 }
 
-/**
- * Build a Wrekenfile map value-type string from an `additionalProperties` value.
- * Handles scalar, array-of-scalar, array-of-ref, and ref value types so we can
- * render `map[STRING]X` for objects defined only by `additionalProperties`.
- */
-function mapSchemaToMapType(ap: any, spec: any, baseDir: string): string {
-  if (ap === true || !ap || typeof ap !== 'object') {
-    return 'map[STRING]ANY';
-  }
-  if (ap.$ref) {
-    const resolved = resolveRef(ap.$ref, spec, baseDir);
-    if (resolved && resolved.type && resolved.type !== 'object') {
-      return `map[STRING]${mapType(resolved.type, resolved.format)}`;
-    }
-    return `map[STRING]STRUCT(${ap.$ref.split('/').pop()})`;
-  }
-  if (ap.type === 'array' && ap.items) {
-    if (ap.items.$ref) {
-      const resolvedItems = resolveRef(ap.items.$ref, spec, baseDir);
-      if (resolvedItems && resolvedItems.type && resolvedItems.type !== 'object') {
-        return `map[STRING][]${mapType(resolvedItems.type, resolvedItems.format)}`;
-      }
-      return `map[STRING][]STRUCT(${ap.items.$ref.split('/').pop()})`;
-    }
-    if (ap.items.type) {
-      return `map[STRING][]${mapType(ap.items.type, ap.items.format)}`;
-    }
-    return 'map[STRING][]ANY';
-  }
-  if (ap.type) {
-    return `map[STRING]${mapType(ap.type, ap.format)}`;
-  }
-  return 'map[STRING]ANY';
-}
-
 function getTypeFromSchema(schema: any, spec: any, baseDir: string): string {
   if (!schema || typeof schema !== 'object') {
     return 'ANY';
@@ -161,15 +126,6 @@ function getTypeFromSchema(schema: any, spec: any, baseDir: string): string {
     const resolvedSchema = resolveRef(schema.$ref, spec, baseDir);
     if (resolvedSchema && resolvedSchema.type && resolvedSchema.type !== 'object') {
       return mapType(resolvedSchema.type, resolvedSchema.format);
-    }
-    // Resolve propertyless object schemas at the $ref site so we don't emit
-    // dangling STRUCT(Foo) references for schemas that will never be registered
-    // (since they have no properties to parse into struct fields).
-    if (resolvedSchema && resolvedSchema.type === 'object' && !resolvedSchema.properties) {
-      if (resolvedSchema.additionalProperties) {
-        return mapSchemaToMapType(resolvedSchema.additionalProperties, spec, baseDir);
-      }
-      return 'OBJECT';
     }
     const refName = schema.$ref.split('/').pop();
     return `STRUCT(${refName})`;
@@ -303,27 +259,6 @@ function generateStructName(_operationId: string, method: string, path: string, 
   return `${canonicalId}${suffix}`;
 }
 
-/**
- * Pick a struct name for an error response whose content schema is inline
- * (no `$ref`). When the response object itself is a `$ref` to
- * `#/components/responses/X`, the returned name is stable across all call
- * sites so the struct can be defined once and referenced from every operation.
- */
-function getErrorStructName(rawResponse: any, op: any, code: string): string {
-  if (rawResponse && rawResponse.$ref && typeof rawResponse.$ref === 'string') {
-    const key = rawResponse.$ref.split('/').pop() || '';
-    if (/^[0-9]+$/.test(key)) {
-      return `Error${key}`;
-    }
-    if (key) {
-      return `Response_${key}`;
-    }
-  }
-  // Truly inline per-operation error schema — scope the name to the operation
-  const opId = op.operationId || 'op';
-  return `${opId}_Error${code}`;
-}
-
 function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
   const structs: Record<string, any[]> = {};
   const schemas = spec.components?.schemas || {};
@@ -391,24 +326,6 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
       structs[`${name}_Union`] = unionFields.length > 0 ? unionFields : [{ name: 'value', type: 'ANY', REQUIRED: false }];
     }
   }
-
-  // Register shared error-response schemas from components.responses under the
-  // same name extractErrors uses for them, so `STRUCT(ErrorNNN)` references
-  // resolve to an actual definition.
-  const componentResponses = spec.components?.responses || {};
-  for (const [key, rawResp] of Object.entries<any>(componentResponses)) {
-    if (!rawResp || !rawResp.content) continue;
-    const jsonContent = rawResp.content[CONTENT_TYPE_JSON];
-    const schema = jsonContent?.schema;
-    if (!schema) continue;
-    const structName = /^[0-9]+$/.test(key) ? `Error${key}` : `Response_${key}`;
-    if (schema.$ref) {
-      const refName = schema.$ref.split('/').pop();
-      if (refName) collectAllReferencedSchemas(resolveRef(schema.$ref, spec, baseDir), refName);
-    } else if (typeof schema === 'object') {
-      collectAllReferencedSchemas(schema, structName);
-    }
-  }
   
   // Extract inline schemas from operations
   if (spec.paths && typeof spec.paths === 'object') {
@@ -452,13 +369,8 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
                       collectAllReferencedSchemas(schema.items, responseStructName);
                     }
                   } else if (schema.type === 'object' && typeof schema === 'object') {
-                    // Inline object schema - create struct. Error codes use
-                    // the same naming extractErrors picks so the STRUCT(...)
-                    // reference resolves to this definition.
-                    const statusCode = parseInt(code);
-                    const responseStructName = statusCode >= 400
-                      ? getErrorStructName(rawResp, op, code)
-                      : generateStructName(operationId, method, pathStr, `Response${code}`);
+                    // Inline object schema - create struct
+                    const responseStructName = generateStructName(operationId, method, pathStr, `Response${code}`);
                     collectAllReferencedSchemas(schema, responseStructName);
                   }
                 }
@@ -853,17 +765,9 @@ function extractErrors(op: any, spec: any, baseDir: string): any[] {
           const schema = jsonContent.schema;
           if (schema.$ref) {
             errorType = getTypeFromSchema(schema, spec, baseDir);
-          } else if (schema.type && schema.type !== 'object') {
-            // Primitive / array error schema — emit the primitive type
-            // directly instead of wrapping in a dangling STRUCT(...).
-            errorType = getTypeFromSchema(schema, spec, baseDir);
           } else {
-            // Inline object error schema. Name it so extractStructs can
-            // register the matching definition. Shared components.responses
-            // entries get a stable name (Error{code} or Response_{key});
-            // truly inline per-operation schemas get an operation-specific
-            // name so two different 400 bodies don't collide on `Error400`.
-            const errorStructName = getErrorStructName(rawResponse, op, code);
+            // Inline error schema - generate a struct name
+            const errorStructName = `Error${code}`;
             errorType = `STRUCT(${errorStructName})`;
           }
         }
