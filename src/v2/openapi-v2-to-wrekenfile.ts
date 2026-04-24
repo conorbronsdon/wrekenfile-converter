@@ -112,6 +112,40 @@ function resolveRef(ref: string, spec: any, baseDir: string): any {
   }
 }
 
+/**
+ * Build a Wrekenfile map value-type string from a Swagger v2
+ * `additionalProperties` value.
+ */
+function mapSchemaToMapType(ap: any, spec: any, baseDir: string): string {
+  if (ap === true || !ap || typeof ap !== 'object') {
+    return 'map[STRING]ANY';
+  }
+  if (ap.$ref) {
+    const resolved = resolveRef(ap.$ref, spec, baseDir);
+    if (resolved && resolved.type && resolved.type !== 'object') {
+      return `map[STRING]${mapType(resolved.type, resolved.format)}`;
+    }
+    return `map[STRING]STRUCT(${ap.$ref.split('/').pop()})`;
+  }
+  if (ap.type === 'array' && ap.items) {
+    if (ap.items.$ref) {
+      const resolvedItems = resolveRef(ap.items.$ref, spec, baseDir);
+      if (resolvedItems && resolvedItems.type && resolvedItems.type !== 'object') {
+        return `map[STRING][]${mapType(resolvedItems.type, resolvedItems.format)}`;
+      }
+      return `map[STRING][]STRUCT(${ap.items.$ref.split('/').pop()})`;
+    }
+    if (ap.items.type) {
+      return `map[STRING][]${mapType(ap.items.type, ap.items.format)}`;
+    }
+    return 'map[STRING][]ANY';
+  }
+  if (ap.type) {
+    return `map[STRING]${mapType(ap.type, ap.format)}`;
+  }
+  return 'map[STRING]ANY';
+}
+
 function getTypeFromSchema(schema: any, spec: any, baseDir: string): string {
   if (!schema || typeof schema !== 'object') {
     return 'ANY';
@@ -120,6 +154,14 @@ function getTypeFromSchema(schema: any, spec: any, baseDir: string): string {
     const resolvedSchema = resolveRef(schema.$ref, spec, baseDir);
     if (resolvedSchema && resolvedSchema.type && resolvedSchema.type !== 'object') {
       return mapType(resolvedSchema.type, resolvedSchema.format);
+    }
+    // Resolve propertyless object schemas at the $ref site to avoid dangling
+    // STRUCT(Foo) references for schemas that will never produce fields.
+    if (resolvedSchema && resolvedSchema.type === 'object' && !resolvedSchema.properties) {
+      if (resolvedSchema.additionalProperties) {
+        return mapSchemaToMapType(resolvedSchema.additionalProperties, spec, baseDir);
+      }
+      return 'OBJECT';
     }
     const refName = schema.$ref.split('/').pop();
     return `STRUCT(${refName})`;
@@ -257,6 +299,26 @@ function generateStructName(_operationId: string, method: string, path: string, 
   return `${canonicalId}${suffix}`;
 }
 
+/**
+ * Pick a struct name for a Swagger v2 error response whose schema is inline
+ * (no `$ref`). When the response object itself is a `$ref` to `#/responses/X`,
+ * the returned name is stable across all call sites so one definition is
+ * referenced from every operation.
+ */
+function getErrorStructName(rawResponse: any, op: any, code: string): string {
+  if (rawResponse && rawResponse.$ref && typeof rawResponse.$ref === 'string') {
+    const key = rawResponse.$ref.split('/').pop() || '';
+    if (/^[0-9]+$/.test(key)) {
+      return `Error${key}`;
+    }
+    if (key) {
+      return `Response_${key}`;
+    }
+  }
+  const opId = op.operationId || 'op';
+  return `${opId}_Error${code}`;
+}
+
 function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
   const structs: Record<string, any[]> = {};
   const definitions = spec.definitions || {}; // OpenAPI v2 uses 'definitions' instead of 'components.schemas'
@@ -324,6 +386,20 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
       structs[`${name}_Union`] = unionFields.length > 0 ? unionFields : [{ name: 'value', type: 'ANY', REQUIRED: false }];
     }
   }
+
+  // Register shared response schemas from spec.responses under the same name
+  // extractErrors uses for them, so `STRUCT(ErrorNNN)` references resolve.
+  const topLevelResponses = spec.responses || {};
+  for (const [key, rawResp] of Object.entries<any>(topLevelResponses)) {
+    if (!rawResp || !rawResp.schema) continue;
+    const structName = /^[0-9]+$/.test(key) ? `Error${key}` : `Response_${key}`;
+    if (rawResp.schema.$ref) {
+      const refName = rawResp.schema.$ref.split('/').pop();
+      if (refName) collectAllReferencedSchemas(resolveRef(rawResp.schema.$ref, spec, baseDir), refName);
+    } else if (typeof rawResp.schema === 'object') {
+      collectAllReferencedSchemas(rawResp.schema, structName);
+    }
+  }
   
   // Extract inline schemas from operations
   if (spec.paths && typeof spec.paths === 'object') {
@@ -360,7 +436,12 @@ function extractStructs(spec: any, baseDir: string): Record<string, any[]> {
                 const refName = actualResponse.schema.$ref.split('/').pop();
                 if (refName) collectAllReferencedSchemas(resolveRef(actualResponse.schema.$ref, spec, baseDir), refName);
               } else if (actualResponse.schema && typeof actualResponse.schema === 'object') {
-                const responseStructName = generateStructName(operationId, method, pathStr, `Response${code}`);
+                // For error codes, use the same name extractErrors will emit
+                // so the STRUCT(...) reference resolves.
+                const statusCode = parseInt(code);
+                const responseStructName = statusCode >= 400
+                  ? getErrorStructName(response, op, code)
+                  : generateStructName(operationId, method, pathStr, `Response${code}`);
                 collectAllReferencedSchemas(actualResponse.schema, responseStructName);
               }
             }
@@ -730,9 +811,16 @@ function extractErrors(op: any, spec: any, baseDir: string): any[] {
         const schema = actualResponse.schema;
         if (schema.$ref) {
           errorType = getTypeFromSchema(schema, spec, baseDir);
+        } else if (schema.type && schema.type !== 'object') {
+          // Primitive / array error schema — emit the primitive type directly
+          // instead of wrapping in a dangling STRUCT(...).
+          errorType = getTypeFromSchema(schema, spec, baseDir);
         } else {
-          // Inline error schema - generate a struct name
-          const errorStructName = `Error${code}`;
+          // Inline object error schema — generate a struct name. Shared
+          // Swagger v2 responses (spec.responses.X) get a stable name so the
+          // corresponding struct registered by extractStructs is the same one
+          // extractErrors references.
+          const errorStructName = getErrorStructName(response, op, code);
           errorType = `STRUCT(${errorStructName})`;
         }
       }
