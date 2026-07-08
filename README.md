@@ -2,6 +2,8 @@
 
 # Wrekenfile Converter
 
+> **This project has moved into Swytchcode's org.** Active development continues at [swytchcodehq/wrekenfile-converter](https://github.com/swytchcodehq/wrekenfile-converter). This repo is archived as the pre-migration original.
+
 Convert OpenAPI and Postman specs into execution-first Wrekenfiles for AI agents and LLM code generation.
 
 [![GitHub stars](https://img.shields.io/github/stars/conorbronsdon/wrekenfile-converter?style=social)](https://github.com/conorbronsdon/wrekenfile-converter/stargazers)
