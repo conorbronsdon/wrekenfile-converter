@@ -400,10 +400,6 @@ This fork is maintained by [Conor Bronsdon](https://github.com/conorbronsdon) an
 
 ---
 
-## Disclaimer
-
-*This is an independent personal project, not affiliated with, sponsored by, or endorsed by any company. All views expressed are my own.*
-
 ## License
 
 MIT
